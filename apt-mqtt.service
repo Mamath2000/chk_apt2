@@ -1,0 +1,13 @@
+
+[Unit]
+Description=APT MQTT Updater (Bash)
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/root/chk_apt2/apt_mqtt/apt_mqtt_daemon.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

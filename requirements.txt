@@ -1,0 +1,7 @@
+
+# System packages required (Debian/Ubuntu):
+# - mosquitto-clients (fournit mosquitto_pub / mosquitto_sub)
+# - jq (formatage JSON)
+mosquitto-clients
+jq
+
