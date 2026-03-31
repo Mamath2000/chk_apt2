@@ -65,7 +65,7 @@ DAEMON_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 LOGFILE="/var/log/apt_mqtt.log"
 
 # State persistence: store installed_version so Home Assistant sees stable versions
-STATE_FILE="$DAEMON_PATH/state.json"
+STATE_FILE="${SCRIPT_DIR}/state.json"
 
 read_state() {
   # Load installed_version from state file; default to 1.0.0
