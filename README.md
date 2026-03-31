@@ -76,7 +76,7 @@ Configuration via fichier / variables d'environnement:
 - `CHECK_INTERVAL` (en secondes, défaut 3600)
 
 Notes:
-- Le démon publie la découverte MQTT Home Assistant (préfixe `homeassistant`) et crée une entité `update` nommée "APT Packages (HOSTNAME)". L'entité `update` peut être cliquée depuis l'interface Home Assistant pour lancer l'installation.
+- Le démon publie la découverte MQTT Home Assistant (préfixe `homeassistant`) et crée une entité `update` par serveur. Le `device` publié est global et représente le script d'update (nom par défaut: "APT Updater", identifiant = `OBJECT_ID`). Chaque entité `update` est nommée par le `hostname` du serveur et peut être cliquée depuis l'interface Home Assistant pour lancer l'installation.
 - Le démon écoute le `command_topic` et attend le payload `install`; lorsqu'il le reçoit, il exécute `apt-get update` puis `apt-get -y upgrade`.
 - Le démon publie sur `<base-topic>/<hostname>/state` un payload JSON contenant `installed_version`, `latest_version`, `in_progress` et `last_check`. Les attributs détaillés (liste des paquets upgradables, etc.) sont publiés sur `<base-topic>/<hostname>/attributes`.
 - Exécuter le service en tant que `root` ou donner les droits nécessaires pour appeler `apt-get`.
