@@ -1,3 +1,4 @@
 config.conf
 # Ignore local config copies
 /config.conf
+state.json
