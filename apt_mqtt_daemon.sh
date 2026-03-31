@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/libs/mqtt.sh"
+source "$SCRIPT_DIR/libs/tools.sh"
+
 usage() {
   cat <<'EOF'
 Usage: apt_mqtt_daemon.sh
@@ -17,7 +21,6 @@ EOF
 }
 
 # Load configuration file (if present) before defaults
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_CANDIDATES=(/etc/apt_mqtt/config.conf "$HOME/.config/apt_mqtt/config.conf" "$SCRIPT_DIR/config.conf")
 for cfg in "${CONFIG_CANDIDATES[@]}"; do
   if [ -r "$cfg" ]; then
