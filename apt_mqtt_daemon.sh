@@ -107,7 +107,7 @@ publish_status() {
 
 
 handle_install() {
-  local dry="$1" result rc last_run last_result -y
+  local dry="$1" result rc last_run last_result
   if [ "$in_progress" = "true" ]; then
     echo "Une mise à jour est déjà en cours"
     return
