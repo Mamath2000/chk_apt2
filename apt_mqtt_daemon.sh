@@ -55,6 +55,16 @@ ATTR_TOPIC="$TOPIC_PREFIX/attributes"
 CMD_TOPIC="$TOPIC_PREFIX/command"
 AVAIL_TOPIC="$TOPIC_PREFIX/availability"
 
+# Hardcoded behavior (migrated from config.conf)
+# Always perform a full upgrade (dist-upgrade) and assume yes (-y).
+# Autoremove remains configurable only in this script.
+APT_YES='-y'
+AUTOREMOVE=false
+# Path to this daemon (computed from script dir)
+DAEMON_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+# Logfile (kept in script; systemd can be used instead)
+LOGFILE="/var/log/apt_mqtt.log"
+
 # check required commands
 MISSING=0
 for cmd in mosquitto_pub mosquitto_sub jq apt-get apt; do
@@ -98,7 +108,8 @@ publish_discovery() {
     '{name:$name, platform:$platform, state_topic:$state_topic, json_attributes_topic:$json_attributes_topic, availability_topic:$availability_topic, command_topic:$command_topic, payload_install:$payload_install, unique_id:$unique_id, device:{identifiers:[$device_id], name:$device_name, model:$model, manufacturer:$manufacturer}}')
 
   # Publish only the update entity via MQTT discovery (no separate button)
-  mqtt_pub "homeassistant/update/$OBJECT_ID/config" "$update_json" true
+  # Use a discovery topic unique per host so multiple servers don't overwrite each other
+  mqtt_pub "homeassistant/update/${OBJECT_ID}_$HOSTNAME/config" "$update_json" true
 }
 
 check_upgrades() {
@@ -149,7 +160,7 @@ publish_status() {
 }
 
 handle_install() {
-  local dry="$1" result rc last_run last_result
+  local dry="$1" result rc last_run last_result APT_YES
   if [ "$in_progress" = "true" ]; then
     echo "Une mise à jour est déjà en cours"
     return
@@ -158,13 +169,18 @@ handle_install() {
   publish_status
   echo "Lancement apt-get update..."
   apt-get update >/dev/null 2>&1 || true
+
   if [ "$dry" = "true" ]; then
-    result=$(apt-get -s upgrade 2>&1 || true)
+    result=$(apt-get -s dist-upgrade 2>&1 || true)
     rc=0
   else
-    result=$(apt-get -y upgrade 2>&1 || true)
+    result=$(apt-get $APT_YES dist-upgrade 2>&1 || true)
     rc=$?
+    if [ "$AUTOREMOVE" = "true" ] && [ "$rc" -eq 0 ]; then
+      apt-get $APT_YES autoremove 2>&1 || true
+    fi
   fi
+
   last_run=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   last_result=$(printf '%s' "$result" | head -c20000)
   attrs=$(jq -n --argjson packages "$(check_upgrades)" --arg last_run "$last_run" --arg last_result "$last_result" --arg last_result_code "$rc" '{count: ($packages|length), packages: $packages, last_run: $last_run, last_result_code: ($last_result_code|tonumber), last_result: $last_result, in_progress: false}')
@@ -220,6 +236,7 @@ main() {
   # main loop: publish periodic status
   while true; do
     publish_status
+    # No automatic upgrades: manual trigger via MQTT `command_topic` only.
     sleep "$CHECK_INTERVAL"
   done
 }
