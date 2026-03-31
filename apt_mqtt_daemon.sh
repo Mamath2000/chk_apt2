@@ -65,6 +65,48 @@ DAEMON_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 # Logfile (kept in script; systemd can be used instead)
 LOGFILE="/var/log/apt_mqtt.log"
 
+# State persistence: store installed_version so Home Assistant sees stable versions
+STATE_DIR="/var/lib/apt_mqtt"
+STATE_FILE="$STATE_DIR/state.json"
+
+ensure_state_dir() {
+  if [ ! -d "$STATE_DIR" ]; then
+    mkdir -p "$STATE_DIR" 2>/dev/null || true
+  fi
+}
+
+read_state() {
+  # Load installed_version from state file; default to 1.0.0
+  INSTALLED_VERSION="1.0.0"
+  if [ -r "$STATE_FILE" ]; then
+    v=$(jq -r '.installed_version // empty' "$STATE_FILE" 2>/dev/null || true)
+    if [ -n "$v" ] && [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      INSTALLED_VERSION="$v"
+    fi
+  else
+    # try to create default state file
+    ensure_state_dir
+    echo "{\"installed_version\": \"$INSTALLED_VERSION\"}" > "$STATE_FILE" 2>/dev/null || true
+  fi
+}
+
+write_state() {
+  local ver="$1"
+  ensure_state_dir
+  jq -n --arg v "$ver" '{installed_version: $v}' > "$STATE_FILE" 2>/dev/null || echo "{\"installed_version\": \"$ver\"}" > "$STATE_FILE"
+}
+
+bump_version() {
+  local v="$1"
+  if [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    local major="${BASH_REMATCH[1]}" minor="${BASH_REMATCH[2]}" patch="${BASH_REMATCH[3]}"
+    patch=$((patch + 1))
+    printf "%s.%s.%s" "$major" "$minor" "$patch"
+  else
+    echo "1.0.1"
+  fi
+}
+
 # check required commands
 MISSING=0
 for cmd in mosquitto_pub mosquitto_sub jq apt-get apt; do
@@ -105,11 +147,26 @@ publish_discovery() {
     --arg device_name "APT Updater" \
     --arg model "apt-mqtt-updater" \
     --arg manufacturer "custom" \
-    '{name:$name, platform:$platform, state_topic:$state_topic, json_attributes_topic:$json_attributes_topic, availability_topic:$availability_topic, command_topic:$command_topic, payload_install:$payload_install, unique_id:$unique_id, device:{identifiers:[$device_id], name:$device_name, model:$model, manufacturer:$manufacturer}}')
+    '{name:$name, 
+      platform:$platform, 
+      state_topic:$state_topic, 
+      value_template:"{{ value_json.installed_version }}",
+      latest_version_topic:$state_topic, 
+      latest_version_template:"{{ value_json.latest_version }}",
+      json_attributes_topic:$json_attributes_topic, 
+      availability_topic:$availability_topic, 
+      command_topic:$command_topic, 
+      payload_install:$payload_install, 
+      unique_id:$unique_id, 
+      device:{
+        identifiers:[$device_id], 
+        name:$device_name, 
+        model:$model, 
+        manufacturer:$manufacturer}}')
 
   # Publish only the update entity via MQTT discovery (no separate button)
   # Use a discovery topic unique per host so multiple servers don't overwrite each other
-  mqtt_pub "homeassistant/update/${OBJECT_ID}_$HOSTNAME/config" "$update_json" true
+  mqtt_pub "homeassistant/update/${OBJECT_ID}/$HOSTNAME/config" "$update_json" true
 }
 
 check_upgrades() {
@@ -143,15 +200,19 @@ check_upgrades() {
 publish_status() {
   local pkgs last_check attrs state_payload installed_version latest_version count
   pkgs=$(check_upgrades)
-  count=$(echo "$pkgs" | jq 'length')
+  count=$(printf '%s' "$pkgs" | jq 'length')
   last_check=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  # Load persistent installed_version (default 1.0.0)
+  read_state
+  installed_version="$INSTALLED_VERSION"
+
   if [ "$count" -eq 0 ]; then
-    installed_version="up-to-date"
-    latest_version="up-to-date"
+    latest_version="$installed_version"
   else
-    installed_version="updates-available"
-    latest_version="${count} updates"
+    latest_version=$(bump_version "$installed_version")
   fi
+
   state_payload=$(jq -n --arg installed_version "$installed_version" --arg latest_version "$latest_version" --arg last_check "$last_check" --arg in_progress "$in_progress" '{installed_version:$installed_version, latest_version:$latest_version, last_check:$last_check, in_progress: ($in_progress == "true")}')
   attrs=$(jq -n --argjson packages "$pkgs" --arg last_check "$last_check" --arg in_progress "$in_progress" '{count: ($packages|length), packages: $packages, last_check: $last_check, in_progress: ($in_progress == "true")}')
   mqtt_pub "$STATE_TOPIC" "$state_payload" true
@@ -178,6 +239,14 @@ handle_install() {
     rc=$?
     if [ "$AUTOREMOVE" = "true" ] && [ "$rc" -eq 0 ]; then
       apt-get $APT_YES autoremove 2>&1 || true
+    fi
+    # On successful upgrade, increment installed_version and persist
+    if [ "$rc" -eq 0 ]; then
+      # reload current installed_version then bump and store
+      read_state
+      new_installed=$(bump_version "$INSTALLED_VERSION")
+      write_state "$new_installed"
+      INSTALLED_VERSION="$new_installed"
     fi
   fi
 
