@@ -83,27 +83,21 @@ mqtt_pub() {
 publish_discovery() {
   update_json=$(jq -n \
     --arg name "APT Packages ($HOSTNAME)" \
+    --arg platform "update" \
     --arg state_topic "$STATE_TOPIC" \
     --arg json_attributes_topic "$ATTR_TOPIC" \
     --arg availability_topic "$AVAIL_TOPIC" \
+    --arg command_topic "$CMD_TOPIC" \
+    --arg payload_install "install" \
     --arg unique_id "${OBJECT_ID}_$HOSTNAME" \
     --arg device_id "apt_$HOSTNAME" \
     --arg device_name "APT $HOSTNAME" \
     --arg model "apt-mqtt-updater" \
     --arg manufacturer "custom" \
-    '{name:$name, state_topic:$state_topic, json_attributes_topic:$json_attributes_topic, availability_topic:$availability_topic, unique_id:$unique_id, device:{identifiers:[$device_id], name:$device_name, model:$model, manufacturer:$manufacturer}}')
+    '{name:$name, platform:$platform, state_topic:$state_topic, json_attributes_topic:$json_attributes_topic, availability_topic:$availability_topic, command_topic:$command_topic, payload_install:$payload_install, unique_id:$unique_id, device:{identifiers:[$device_id], name:$device_name, model:$model, manufacturer:$manufacturer}}')
 
-  button_json=$(jq -n \
-    --arg name "APT Installer les mises à jour ($HOSTNAME)" \
-    --arg command_topic "$CMD_TOPIC" \
-    --arg payload_press "install" \
-    --arg unique_id "${OBJECT_ID}_install_$HOSTNAME" \
-    --arg device_id "apt_$HOSTNAME" \
-    --arg device_name "APT $HOSTNAME" \
-    '{name:$name, command_topic:$command_topic, payload_press:$payload_press, unique_id:$unique_id, device:{identifiers:[$device_id], name:$device_name}}')
-
+  # Publish only the update entity via MQTT discovery (no separate button)
   mqtt_pub "homeassistant/update/$OBJECT_ID/config" "$update_json" true
-  mqtt_pub "homeassistant/button/${OBJECT_ID}_install/config" "$button_json" true
 }
 
 check_upgrades() {
@@ -135,15 +129,22 @@ check_upgrades() {
 }
 
 publish_status() {
-  local pkgs last_check attrs
+  local pkgs last_check attrs state_payload installed_version latest_version count
   pkgs=$(check_upgrades)
-  if [ "$pkgs" = '[]' ]; then state="off"; else state="on"; fi
+  count=$(echo "$pkgs" | jq 'length')
   last_check=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  # in_progress is the string "true" or "false"; convert to boolean in jq
+  if [ "$count" -eq 0 ]; then
+    installed_version="up-to-date"
+    latest_version="up-to-date"
+  else
+    installed_version="updates-available"
+    latest_version="${count} updates"
+  fi
+  state_payload=$(jq -n --arg installed_version "$installed_version" --arg latest_version "$latest_version" --arg last_check "$last_check" --arg in_progress "$in_progress" '{installed_version:$installed_version, latest_version:$latest_version, last_check:$last_check, in_progress: ($in_progress == "true")}')
   attrs=$(jq -n --argjson packages "$pkgs" --arg last_check "$last_check" --arg in_progress "$in_progress" '{count: ($packages|length), packages: $packages, last_check: $last_check, in_progress: ($in_progress == "true")}')
-  mqtt_pub "$STATE_TOPIC" "$state" true
+  mqtt_pub "$STATE_TOPIC" "$state_payload" true
   mqtt_pub "$ATTR_TOPIC" "$attrs" true
-  echo "Published status: $state (count=$(echo "$attrs" | jq .count))"
+  echo "Published status: installed_version=$(printf '%s' "$state_payload" | jq -r .installed_version) (count=$(printf '%s' "$attrs" | jq .count))"
 }
 
 handle_install() {
