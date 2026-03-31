@@ -54,10 +54,7 @@ ATTR_TOPIC="$BASE_TOPIC/attributes"
 CMD_TOPIC="$BASE_TOPIC/command"
 AVAIL_TOPIC="$BASE_TOPIC/availability"
 
-# Hardcoded behavior (migrated from config.conf)
-# Always perform a full upgrade (dist-upgrade) and assume yes (-y).
 # Autoremove remains configurable only in this script.
-APT_YES='-y'
 AUTOREMOVE=false
 # Path to this daemon (computed from script dir)
 DAEMON_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
@@ -129,7 +126,7 @@ publish_status() {
 }
 
 handle_install() {
-  local dry="$1" result rc last_run last_result APT_YES
+  local dry="$1" result rc last_run last_result -y
   if [ "$in_progress" = "true" ]; then
     echo "Une mise à jour est déjà en cours"
     return
@@ -143,10 +140,10 @@ handle_install() {
     result=$(apt-get -s dist-upgrade 2>&1 || true)
     rc=0
   else
-    result=$(apt-get $APT_YES dist-upgrade 2>&1 || true)
+    result=$(apt-get -y dist-upgrade 2>&1 || true)
     rc=$?
     if [ "$AUTOREMOVE" = "true" ] && [ "$rc" -eq 0 ]; then
-      apt-get $APT_YES autoremove 2>&1 || true
+      apt-get -y autoremove 2>&1 || true
     fi
     # On successful upgrade, increment installed_version and persist
     if [ "$rc" -eq 0 ]; then
