@@ -1,0 +1,18 @@
+# Example configuration for apt_mqtt (copy to `config.conf` and edit)
+# Protect the real config: `chmod 600 config.conf`
+
+# MQTT broker settings
+MQTT_BROKER=127.0.0.1
+MQTT_PORT=1883
+MQTT_USERNAME=
+MQTT_PASSWORD=
+
+# MQTT topics / discovery
+MQTT_BASE_TOPIC=apt-update
+OBJECT_ID=apt_update
+MQTT_CLIENT_ID=apt_mqtt_$(hostname -s)
+
+# Daemon behavior
+CHECK_INTERVAL=3600
+
+# Note: AUTO_UPGRADE / ASSUME_YES / FULL_UPGRADE are hardcoded in the daemon script.

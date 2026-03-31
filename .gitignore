@@ -1,0 +1,4 @@
+config.conf
+# Ignore local config copies
+/config.conf
+apt_mqtt/config.conf
