@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 source "$SCRIPT_DIR/libs/mqtt.sh"
 source "$SCRIPT_DIR/libs/tools.sh"
+
 
 usage() {
   cat <<'EOF'
@@ -19,6 +22,10 @@ Exécutez simplement :
   sudo ./apt_mqtt/apt_mqtt_daemon.sh
 EOF
 }
+
+
+# Vérification root en tout début de script
+tools::require_root
 
 # Load configuration file (if present) before defaults
 CONFIG_CANDIDATES=(/etc/apt_mqtt/config.conf "$HOME/.config/apt_mqtt/config.conf" "$SCRIPT_DIR/config.conf")
@@ -38,13 +45,12 @@ PASSWORD="${MQTT_PASSWORD:-}"
 BASE_TOPIC="${MQTT_BASE_TOPIC:-apt-update}"
 OBJECT_ID="${OBJECT_ID:-apt_update}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-3600}"
-# Build a safe hostname for use in MQTT client-id and topics
-# Replace whitespace and unsafe characters with underscores
-RAW_HOSTNAME="$(hostname -s)"
-HOST_SAFENAME="$(printf '%s' "$RAW_HOSTNAME" | sed -E 's/[[:space:]]+/_/g; s/[^A-Za-z0-9._-]/_/g')"
-CLIENT_ID="${MQTT_CLIENT_ID:-apt_mqtt_${HOST_SAFENAME}}"
 
-HOSTNAME="$(hostname -s)"
+# Build a safe hostname for use in MQTT client-id and topics
+RAW_HOSTNAME="$(hostname -s)"
+HOST_SAFENAME="$(tools::sanitize_hostname "$RAW_HOSTNAME")"
+CLIENT_ID="${MQTT_CLIENT_ID:-apt_mqtt_${HOST_SAFENAME}}"
+HOSTNAME="$RAW_HOSTNAME"
 
 # Ensure BASE_TOPIC has no trailing slash
 BASE_TOPIC="${BASE_TOPIC%/}/${HOST_SAFENAME}"
@@ -61,38 +67,11 @@ DAEMON_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 # Logfile (kept in script; systemd can be used instead)
 LOGFILE="/var/log/apt_mqtt.log"
 
+
 # State persistence: store installed_version so Home Assistant sees stable versions
 STATE_FILE="${SCRIPT_DIR}/state.json"
+STATE_DIR="${SCRIPT_DIR}"
 
-read_state() {
-  # Load installed_version from state file; default to 1.0.0
-  INSTALLED_VERSION="1.0.0"
-  if [ -r "$STATE_FILE" ]; then
-    v=$(jq -r '.installed_version // empty' "$STATE_FILE" 2>/dev/null || true)
-    if [ -n "$v" ] && [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      INSTALLED_VERSION="$v"
-    fi
-  else
-    # try to create default state file
-    echo "{\"installed_version\": \"$INSTALLED_VERSION\"}" > "$STATE_FILE" 2>/dev/null || true
-  fi
-}
-
-write_state() {
-  local ver="$1"
-  jq -n --arg v "$ver" '{installed_version: $v}' > "$STATE_FILE" 2>/dev/null || echo "{\"installed_version\": \"$ver\"}" > "$STATE_FILE"
-}
-
-bump_version() {
-  local v="$1"
-  if [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-    local major="${BASH_REMATCH[1]}" minor="${BASH_REMATCH[2]}" patch="${BASH_REMATCH[3]}"
-    patch=$((patch + 1))
-    printf "%s.%s.%s" "$major" "$minor" "$patch"
-  else
-    echo "1.0.1"
-  fi
-}
 
 tools::check_requirements
 
@@ -102,6 +81,7 @@ MOSQ_PID=""
 LOOP_PID=""
 
 
+
 publish_status() {
   local pkgs last_check attrs state_payload installed_version latest_version count
   pkgs=$(tools::check_upgrades)
@@ -109,13 +89,13 @@ publish_status() {
   last_check=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   # Load persistent installed_version (default 1.0.0)
-  read_state
+  tools::read_state
   installed_version="$INSTALLED_VERSION"
 
   if [ "$count" -eq 0 ]; then
     latest_version="$installed_version"
   else
-    latest_version=$(bump_version "$installed_version")
+    latest_version=$(tools::bump_version "$installed_version")
   fi
 
   state_payload=$(jq -n --arg installed_version "$installed_version" --arg latest_version "$latest_version" --arg last_check "$last_check" --arg in_progress "$in_progress" '{installed_version:$installed_version, latest_version:$latest_version, last_check:$last_check, in_progress: ($in_progress == "true")}')
@@ -124,6 +104,7 @@ publish_status() {
   mqtt::pub "$ATTR_TOPIC" "$attrs" true
   echo "Published status: installed_version=$(printf '%s' "$state_payload" | jq -r .installed_version) (count=$(printf '%s' "$attrs" | jq .count))"
 }
+
 
 handle_install() {
   local dry="$1" result rc last_run last_result -y
@@ -148,9 +129,9 @@ handle_install() {
     # On successful upgrade, increment installed_version and persist
     if [ "$rc" -eq 0 ]; then
       # reload current installed_version then bump and store
-      read_state
-      new_installed=$(bump_version "$INSTALLED_VERSION")
-      write_state "$new_installed"
+      tools::read_state
+      new_installed=$(tools::bump_version "$INSTALLED_VERSION")
+      tools::write_state "$new_installed"
       INSTALLED_VERSION="$new_installed"
     fi
   fi
@@ -163,12 +144,13 @@ handle_install() {
   publish_status
 }
 
+
 cleanup() {
   echo "Arrêt du démon..."
   if [ -n "$MOSQ_PID" ]; then kill "$MOSQ_PID" 2>/dev/null || true; fi
   if [ -n "$LOOP_PID" ]; then kill "$LOOP_PID" 2>/dev/null || true; fi
   if [ -n "$CMD_FIFO" ] && [ -p "$CMD_FIFO" ]; then rm -f "$CMD_FIFO"; fi
-  mqtt_pub "$AVAIL_TOPIC" "offline" true || true
+  mqtt::pub "$AVAIL_TOPIC" "offline" true || true
 }
 
 trap 'cleanup; exit 0' SIGINT SIGTERM EXIT
