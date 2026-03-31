@@ -32,28 +32,24 @@ BROKER="${MQTT_BROKER:-localhost}"
 PORT="${MQTT_PORT:-1883}"
 USERNAME="${MQTT_USERNAME:-}"
 PASSWORD="${MQTT_PASSWORD:-}"
-BASE_TOPIC="${MQTT_BASE_TOPIC:-home/apt}"
+BASE_TOPIC="${MQTT_BASE_TOPIC:-apt-update}"
 OBJECT_ID="${OBJECT_ID:-apt_update}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-3600}"
-CLIENT_ID="${MQTT_CLIENT_ID:-apt_mqtt_$(hostname -s)}"
+# Build a safe hostname for use in MQTT client-id and topics
+# Replace whitespace and unsafe characters with underscores
+RAW_HOSTNAME="$(hostname -s)"
+HOST_SAFENAME="$(printf '%s' "$RAW_HOSTNAME" | sed -E 's/[[:space:]]+/_/g; s/[^A-Za-z0-9._-]/_/g')"
+CLIENT_ID="${MQTT_CLIENT_ID:-apt_mqtt_${HOST_SAFENAME}}"
 
 HOSTNAME="$(hostname -s)"
 
 # Ensure BASE_TOPIC has no trailing slash
-BASE_TOPIC="${BASE_TOPIC%/}"
+BASE_TOPIC="${BASE_TOPIC%/}/${HOST_SAFENAME}"
 
-# Build per-host topic prefix. If BASE_TOPIC already contains the hostname, use it as-is,
-# otherwise append the hostname so each server publishes on its own subtree.
-if [[ "$BASE_TOPIC" == *"$HOSTNAME"* ]]; then
-  TOPIC_PREFIX="$BASE_TOPIC"
-else
-  TOPIC_PREFIX="${BASE_TOPIC}/${HOSTNAME}"
-fi
-
-STATE_TOPIC="$TOPIC_PREFIX/state"
-ATTR_TOPIC="$TOPIC_PREFIX/attributes"
-CMD_TOPIC="$TOPIC_PREFIX/command"
-AVAIL_TOPIC="$TOPIC_PREFIX/availability"
+STATE_TOPIC="$BASE_TOPIC/state"
+ATTR_TOPIC="$BASE_TOPIC/attributes"
+CMD_TOPIC="$BASE_TOPIC/command"
+AVAIL_TOPIC="$BASE_TOPIC/availability"
 
 # Hardcoded behavior (migrated from config.conf)
 # Always perform a full upgrade (dist-upgrade) and assume yes (-y).
@@ -66,14 +62,7 @@ DAEMON_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 LOGFILE="/var/log/apt_mqtt.log"
 
 # State persistence: store installed_version so Home Assistant sees stable versions
-STATE_DIR="/var/lib/apt_mqtt"
-STATE_FILE="$STATE_DIR/state.json"
-
-ensure_state_dir() {
-  if [ ! -d "$STATE_DIR" ]; then
-    mkdir -p "$STATE_DIR" 2>/dev/null || true
-  fi
-}
+STATE_FILE="$DAEMON_PATH/state.json"
 
 read_state() {
   # Load installed_version from state file; default to 1.0.0
@@ -85,14 +74,12 @@ read_state() {
     fi
   else
     # try to create default state file
-    ensure_state_dir
     echo "{\"installed_version\": \"$INSTALLED_VERSION\"}" > "$STATE_FILE" 2>/dev/null || true
   fi
 }
 
 write_state() {
   local ver="$1"
-  ensure_state_dir
   jq -n --arg v "$ver" '{installed_version: $v}' > "$STATE_FILE" 2>/dev/null || echo "{\"installed_version\": \"$ver\"}" > "$STATE_FILE"
 }
 
@@ -107,99 +94,17 @@ bump_version() {
   fi
 }
 
-# check required commands
-MISSING=0
-for cmd in mosquitto_pub mosquitto_sub jq apt-get apt; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "Erreur: la commande '$cmd' est requise. Installez 'mosquitto-clients' et 'jq'." >&2
-    MISSING=1
-  fi
-done
-if [ "$MISSING" -ne 0 ]; then
-  exit 1
-fi
+tools::check_requirements
 
 in_progress="false"
 CMD_FIFO=""
 MOSQ_PID=""
 LOOP_PID=""
 
-mqtt_pub() {
-  local topic="$1" payload="$2" retain="${3:-false}"
-  local args=( -h "$BROKER" -p "$PORT" )
-  if [ -n "$USERNAME" ]; then args+=( -u "$USERNAME" -P "$PASSWORD" ); fi
-  if [ "$retain" = true ]; then args+=( -r ); fi
-  mosquitto_pub "${args[@]}" -t "$topic" -m "$payload"
-}
-
-publish_discovery() {
-  # Entity name = hostname; device is global and represents the update script
-  update_json=$(jq -n \
-    --arg name "$HOSTNAME" \
-    --arg platform "update" \
-    --arg state_topic "$STATE_TOPIC" \
-    --arg json_attributes_topic "$ATTR_TOPIC" \
-    --arg availability_topic "$AVAIL_TOPIC" \
-    --arg command_topic "$CMD_TOPIC" \
-    --arg payload_install "install" \
-    --arg unique_id "${OBJECT_ID}_$HOSTNAME" \
-    --arg device_id "${OBJECT_ID}" \
-    --arg device_name "APT Updater" \
-    --arg model "apt-mqtt-updater" \
-    --arg manufacturer "custom" \
-    '{name:$name, 
-      platform:$platform, 
-      state_topic:$state_topic, 
-      value_template:"{{ value_json.installed_version }}",
-      latest_version_topic:$state_topic, 
-      latest_version_template:"{{ value_json.latest_version }}",
-      json_attributes_topic:$json_attributes_topic, 
-      availability_topic:$availability_topic, 
-      command_topic:$command_topic, 
-      payload_install:$payload_install, 
-      unique_id:$unique_id, 
-      device:{
-        identifiers:[$device_id], 
-        name:$device_name, 
-        model:$model, 
-        manufacturer:$manufacturer}}')
-
-  # Publish only the update entity via MQTT discovery (no separate button)
-  # Use a discovery topic unique per host so multiple servers don't overwrite each other
-  mqtt_pub "homeassistant/update/${OBJECT_ID}/$HOSTNAME/config" "$update_json" true
-}
-
-check_upgrades() {
-  local out
-  out=$(apt list --upgradable 2>/dev/null || true)
-  out="$(echo "$out" | sed '1d')"
-  if [ -z "$(echo "$out" | tr -d '[:space:]')" ]; then
-    printf '[]'
-    return
-  fi
-  printf '['
-  first=true
-  while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    pkg=$(printf '%s' "$line" | cut -d'/' -f1)
-    candidate=$(printf '%s' "$line" | awk '{print $2}')
-    installed=""
-    if printf '%s' "$line" | grep -q 'upgradable from:'; then
-      installed=$(printf '%s' "$line" | sed -n 's/.*upgradable from: \([^]]*\).*/\1/p')
-    fi
-    # escape
-    pkg_esc=$(printf '%s' "$pkg" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    inst_esc=$(printf '%s' "$installed" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    cand_esc=$(printf '%s' "$candidate" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    if [ "$first" = true ]; then first=false; else printf ','; fi
-    printf '{"name":"%s","installed":"%s","candidate":"%s"}' "$pkg_esc" "$inst_esc" "$cand_esc"
-  done <<< "$out"
-  printf ']'
-}
 
 publish_status() {
   local pkgs last_check attrs state_payload installed_version latest_version count
-  pkgs=$(check_upgrades)
+  pkgs=$(tools::check_upgrades)
   count=$(printf '%s' "$pkgs" | jq 'length')
   last_check=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -215,8 +120,8 @@ publish_status() {
 
   state_payload=$(jq -n --arg installed_version "$installed_version" --arg latest_version "$latest_version" --arg last_check "$last_check" --arg in_progress "$in_progress" '{installed_version:$installed_version, latest_version:$latest_version, last_check:$last_check, in_progress: ($in_progress == "true")}')
   attrs=$(jq -n --argjson packages "$pkgs" --arg last_check "$last_check" --arg in_progress "$in_progress" '{count: ($packages|length), packages: $packages, last_check: $last_check, in_progress: ($in_progress == "true")}')
-  mqtt_pub "$STATE_TOPIC" "$state_payload" true
-  mqtt_pub "$ATTR_TOPIC" "$attrs" true
+  mqtt::pub "$STATE_TOPIC" "$state_payload" true
+  mqtt::pub "$ATTR_TOPIC" "$attrs" true
   echo "Published status: installed_version=$(printf '%s' "$state_payload" | jq -r .installed_version) (count=$(printf '%s' "$attrs" | jq .count))"
 }
 
@@ -252,8 +157,8 @@ handle_install() {
 
   last_run=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   last_result=$(printf '%s' "$result" | head -c20000)
-  attrs=$(jq -n --argjson packages "$(check_upgrades)" --arg last_run "$last_run" --arg last_result "$last_result" --arg last_result_code "$rc" '{count: ($packages|length), packages: $packages, last_run: $last_run, last_result_code: ($last_result_code|tonumber), last_result: $last_result, in_progress: false}')
-  mqtt_pub "$ATTR_TOPIC" "$attrs" true
+  attrs=$(jq -n --argjson packages "$(tools::check_upgrades)" --arg last_run "$last_run" --arg last_result "$last_result" --arg last_result_code "$rc" '{count: ($packages|length), packages: $packages, last_run: $last_run, last_result_code: ($last_result_code|tonumber), last_result: $last_result, in_progress: false}')
+  mqtt::pub "$ATTR_TOPIC" "$attrs" true
   in_progress="false"
   publish_status
 }
@@ -270,8 +175,8 @@ trap 'cleanup; exit 0' SIGINT SIGTERM EXIT
 
 main() {
   # publish discovery and set online
-  publish_discovery
-  mqtt_pub "$AVAIL_TOPIC" "online" true
+  mqtt::publish_discovery
+  mqtt::pub "$AVAIL_TOPIC" "online" true
 
   # start subscription to command topic using a FIFO so we can manage PIDs
   CMD_FIFO="$(mktemp -u /tmp/apt_mqtt_fifo.XXXXXX)"
