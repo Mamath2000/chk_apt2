@@ -6,7 +6,9 @@ After=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=/root/chk_apt2/apt_mqtt/apt_mqtt_daemon.sh
+WorkingDirectory=/root/chk_apt2
+Environment=APT_MQTT_CONFIG=/root/chk_apt2/config.conf
+ExecStart=/root/chk_apt2/apt_mqtt_daemon.sh
 Restart=on-failure
 
 [Install]

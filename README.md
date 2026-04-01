@@ -1,86 +1,117 @@
-# scripts/update_apt.sh
+# APT MQTT Daemon
 
-Petit script pour mettre à jour les paquets APT.
+Ce projet fournit un démon Bash qui surveille les mises à jour APT disponibles et expose cet état via MQTT pour Home Assistant.
 
-Exemples d'utilisation:
+Le démon publie :
 
-Rendre exécutable:
+- une entité Home Assistant de type update via MQTT Discovery ;
+- un état périodique avec les paquets upgradables ;
+- une commande MQTT permettant de lancer une mise à jour APT à distance.
 
-```bash
-chmod +x scripts/update_apt.sh
-```
+## Structure
 
-Simulation (dry-run):
+- apt_mqtt_daemon.sh : boucle principale du démon.
+- libs/config.sh : chargement de la configuration et calcul des topics MQTT.
+- libs/mqtt.sh : publication MQTT et payload de discovery Home Assistant.
+- libs/apt.sh : interrogation APT et exécution des mises à jour.
+- libs/state.sh : persistance de la version installée dans state.json.
+- libs/tools.sh : utilitaires génériques.
+- config.conf.example : exemple de configuration.
+- apt-mqtt.service : unité systemd d'exemple.
+- install_service.sh : installe ou supprime l'unité systemd avec les bons chemins.
 
-```bash
-sudo scripts/update_apt.sh --dry-run
-```
+## Dépendances
 
-Mettre à jour (demande confirmation interactive):
-
-```bash
-sudo scripts/update_apt.sh
-```
-
-Mise à jour complète non interactive + nettoyage:
-
-```bash
-sudo scripts/update_apt.sh --yes --full-upgrade --autoremove
-```
-
-Remarque: exécuter les opérations réelles nécessite des privilèges root (sudo).
-
----
-
-
-**Démon MQTT (Bash) pour Home Assistant**
-
-J'ai ajouté un démon Bash qui publie via MQTT une entité `update` et un `button` pour déclencher les mises à jour APT (sans Python).
-
-- Fichiers ajoutés: `apt_mqtt/apt_mqtt_daemon.sh`, `apt_mqtt/requirements.txt`, `apt_mqtt/apt-mqtt.service`
-
-Dépendances système (Debian/Ubuntu):
+Paquets système requis sur Debian/Ubuntu :
 
 ```bash
 sudo apt update
 sudo apt install -y mosquitto-clients jq
 ```
 
-Configuration minimale:
+## Configuration
 
-1. Rendre exécutable:
+Le démon cherche un fichier de configuration dans cet ordre :
 
-```bash
-chmod +x apt_mqtt/apt_mqtt_daemon.sh
-```
+1. chemin explicite via APT_MQTT_CONFIG
+2. /etc/apt_mqtt/config.conf
+3. $HOME/.config/apt_mqtt/config.conf
+4. ./config.conf
 
-2. Lancer manuellement (exemple):
-
-```bash
-sudo ./apt_mqtt/apt_mqtt_daemon.sh
-```
-
-3. Installer en service systemd (exemple):
+Exemple :
 
 ```bash
-sudo cp apt_mqtt/apt-mqtt.service /etc/systemd/system/apt-mqtt.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now apt-mqtt.service
+cp config.conf.example config.conf
+chmod 600 config.conf
 ```
 
-Configuration via fichier / variables d'environnement:
-- `MQTT_BROKER` (default `localhost`)
-- `MQTT_PORT` (default `1883`)
-- `MQTT_BASE_TOPIC` (default `home/apt`)
-- `MQTT_USERNAME` / `MQTT_PASSWORD` si nécessaire
-- `CHECK_INTERVAL` (en secondes, défaut 3600)
+Variables principales :
 
-Notes:
-- Le démon publie la découverte MQTT Home Assistant (préfixe `homeassistant`) et crée une entité `update` par serveur. Le `device` publié est global et représente le script d'update (nom par défaut: "APT Updater", identifiant = `OBJECT_ID`). Chaque entité `update` est nommée par le `hostname` du serveur et peut être cliquée depuis l'interface Home Assistant pour lancer l'installation.
-- Le démon écoute le `command_topic` et attend le payload `install`; lorsqu'il le reçoit, il exécute `apt-get update` puis `apt-get -y dist-upgrade` (full upgrade).
-- Le démon publie sur `<base-topic>/<hostname>/state` un payload JSON contenant `installed_version`, `latest_version`, `in_progress` et `last_check`. Les attributs détaillés (liste des paquets upgradables, etc.) sont publiés sur `<base-topic>/<hostname>/attributes`.
-- Exécuter le service en tant que `root` ou donner les droits nécessaires pour appeler `apt-get`.
+- MQTT_BROKER : hôte du broker MQTT.
+- MQTT_PORT : port du broker.
+- MQTT_USERNAME / MQTT_PASSWORD : authentification éventuelle.
+- MQTT_BASE_TOPIC : racine des topics publiés.
+- OBJECT_ID : identifiant de l'entité Home Assistant.
+- CHECK_INTERVAL : délai entre deux publications d'état.
 
-Sécurité:
-- Configurez l'authentification MQTT (variables d'environnement `MQTT_USERNAME` / `MQTT_PASSWORD`) si votre broker l'exige.
+Le hostname est normalisé puis ajouté automatiquement au topic de base.
+
+## Exécution
+
+Exécution manuelle :
+
+```bash
+chmod +x apt_mqtt_daemon.sh
+sudo ./apt_mqtt_daemon.sh
+```
+
+Installation en service systemd :
+
+```bash
+sudo ./install_service.sh install
+```
+
+Installation puis suivi live du service :
+
+```bash
+sudo ./install_service.sh install -f
+```
+
+Avec un fichier de configuration spécifique :
+
+```bash
+sudo ./install_service.sh install --config /chemin/vers/config.conf
+```
+
+Voir l'état du service plus tard :
+
+```bash
+sudo ./install_service.sh status
+sudo ./install_service.sh status -f
+```
+
+Suppression du service :
+
+```bash
+sudo ./install_service.sh remove
+```
+
+## MQTT exposé
+
+Pour un hostname sanitizé my-host et MQTT_BASE_TOPIC=apt-update :
+
+- état : apt-update/my-host/state
+- attributs : apt-update/my-host/attributes
+- commandes : apt-update/my-host/command
+- disponibilité : apt-update/my-host/availability
+
+Commandes acceptées sur le topic de commande :
+
+- install, update, upgrade : lance apt-get update puis apt-get -y dist-upgrade
+- dry-run, simulate : simulation sans changement
+- check, status : republie l'état immédiatement
+
+## Documentation détaillée
+
+Voir [docs/fonctionnement.md](docs/fonctionnement.md) pour le fonctionnement interne, le format des messages et les choix de structure.
 
