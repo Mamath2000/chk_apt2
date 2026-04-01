@@ -150,7 +150,7 @@ mqtt::publish_host_device_discovery() {
         },
         "${device_id}_script_version": {
           platform: "sensor",
-          name: "Version du script",
+          name: "Update script (ver)",
           state_topic:$version_topic, 
           availability_topic:$availability_topic,
           entity_category: "diagnostic",
