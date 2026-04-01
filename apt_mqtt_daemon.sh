@@ -115,6 +115,7 @@ trap 'cleanup; exit 0' SIGINT SIGTERM EXIT
 
 main() {
   # publish discovery and set online
+  mqtt::publish_main_device_discovery
   mqtt::publish_discovery
   mqtt::pub "$AVAIL_TOPIC" "online" true
 

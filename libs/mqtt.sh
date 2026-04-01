@@ -17,22 +17,57 @@ mqtt::sub() {
   mosquitto_sub "${args[@]}"
 }
 
+mqtt::publish_main_device_discovery() {
+  local update_json
+  # Entity name = hostname; device is global and represents the update script
+  update_json=$(jq -n \
+    --arg name "APT Updater Daemon" \
+    '{device:{
+          identifiers:["apt_mqtt_daemon"], 
+        name:$name, 
+        model:"apt-mqtt-updater", 
+        manufacturer:"Mamath"
+      },
+      origin: {name: "APT MQTT Updater"},
+      components:{
+        "apt_mqtt_daemon_status": {
+              "platform": "binary_sensor",
+              "unique_id": "apt_mqtt_daemon_status",
+              "default_entity_id": "binary_sensor.apt_mqtt_daemon_status",
+              "name": "Status",
+              "state_topic": "homeassistant/device/apt_mqtt_daemon/main/config",
+              "value_template": "online",
+              "payload_on": "online",
+              "payload_off": "offline",
+              "device_class": "connectivity",
+              "icon": "mdi:server-network"
+            }
+        }
+    }')
+
+  # Publish only the update entity via MQTT discovery (no separate button)
+  # Use a discovery topic unique per host so multiple servers don't overwrite each other
+  mqtt::pub "homeassistant/device/apt_mqtt_daemon/main/config" "$update_json" true
+}
+
 mqtt::publish_discovery() {
   local update_json
   # Entity name = hostname; device is global and represents the update script
   update_json=$(jq -n \
-    --arg name "$HOSTNAME" \
+    --arg name "Apt update" \
     --arg platform "update" \
     --arg state_topic "$STATE_TOPIC" \
     --arg json_attributes_topic "$ATTR_TOPIC" \
     --arg availability_topic "$AVAIL_TOPIC" \
     --arg command_topic "$CMD_TOPIC" \
     --arg payload_install "install" \
-    --arg unique_id "${OBJECT_ID}_${HOST_SAFENAME}" \
-    --arg device_id "${OBJECT_ID}" \
-    --arg device_name "APT Updater" \
+    --arg unique_id "${OBJECT_ID}_${HOST_SAFENAME}_update" \
+    --arg default_entity_id "update.${OBJECT_ID}_${HOST_SAFENAME}_update" \
+    --arg device_id "${OBJECT_ID}_${HOST_SAFENAME}" \
+    --arg device_name "${HOSTNAME}" \
     --arg model "apt-mqtt-updater" \
     --arg manufacturer "custom" \
+    --arg ip "$(hostname -I | awk '{print $1}')" \
     '{name:$name, 
       platform:$platform, 
       state_topic:$state_topic, 
@@ -44,11 +79,16 @@ mqtt::publish_discovery() {
       command_topic:$command_topic, 
       payload_install:$payload_install, 
       unique_id:$unique_id, 
+      default_entity_id:$default_entity_id, 
       device:{
         identifiers:[$device_id], 
         name:$device_name, 
         model:$model, 
-        manufacturer:$manufacturer}}')
+        manufacturer:$manufacturer,
+        via_device:"apt_mqtt_daemon",
+        connections: [["ip",$ip]]
+      }
+    }')
 
   # Publish only the update entity via MQTT discovery (no separate button)
   # Use a discovery topic unique per host so multiple servers don't overwrite each other
