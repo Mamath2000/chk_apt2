@@ -143,6 +143,12 @@ handle_self_update() {
 
   last_run=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   last_result=$(printf '%s' "$result" | head -c20000)
+  # Journaliser la sortie de git pull pour faciliter le debug (ligne par ligne)
+  if [ -n "$last_result" ]; then
+    while IFS= read -r _line; do
+      tools::log ERROR "git pull: ${_line:- }"
+    done <<< "$last_result"
+  fi
   script_version="$(version::read)"
   attrs=$(jq -n --argjson packages "$(apt::check_upgrades)" --arg last_run "$last_run" --arg last_result "$last_result" --arg last_result_code "$rc" --arg script_version "$script_version" '{count: ($packages|length), packages: $packages, last_run: $last_run, last_result_code: ($last_result_code|tonumber), last_result: $last_result, in_progress: false, script_version: $script_version, last_action: "self-update"}')
   mqtt::pub "$ATTR_TOPIC" "$attrs" true
