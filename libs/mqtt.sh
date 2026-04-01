@@ -17,6 +17,34 @@ mqtt::sub() {
   mosquitto_sub "${args[@]}"
 }
 
+mqtt::device_ip_connections() {
+  local ip_list ip_prefix
+
+  ip_prefix="${MQTT_DEVICE_IP_PREFIX:-192.169.}"
+
+  ip_list=$(hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^$/d' | grep "^${ip_prefix//./\\.}" || true)
+  if [ -z "$ip_list" ]; then
+    printf '[]'
+    return
+  fi
+
+  printf '%s\n' "$ip_list" | jq -R . | jq -s 'map(["ip", .])'
+}
+
+mqtt::display_hostname() {
+  local hostname_value="$1"
+  local first_char rest
+
+  if [ -z "$hostname_value" ]; then
+    printf '%s' "$hostname_value"
+    return
+  fi
+
+  first_char=$(printf '%s' "$hostname_value" | cut -c1 | tr '[:lower:]' '[:upper:]')
+  rest=$(printf '%s' "$hostname_value" | cut -c2-)
+  printf '%s%s' "$first_char" "$rest"
+}
+
 mqtt::publish_main_device_discovery() {
   local update_json
   # Entity name = hostname; device is global and represents the update script
@@ -51,7 +79,10 @@ mqtt::publish_main_device_discovery() {
 }
 
 mqtt::publish_discovery() {
-  local update_json
+  local update_json ip_connections device_name
+  ip_connections="$(mqtt::device_ip_connections)"
+  device_name="$(mqtt::display_hostname "$HOSTNAME")"
+
   # Entity name = hostname; device is global and represents the update script
   update_json=$(jq -n \
     --arg name "Apt update" \
@@ -64,10 +95,10 @@ mqtt::publish_discovery() {
     --arg unique_id "${OBJECT_ID}_${HOST_SAFENAME}_update" \
     --arg default_entity_id "update.${OBJECT_ID}_${HOST_SAFENAME}_update" \
     --arg device_id "${OBJECT_ID}_${HOST_SAFENAME}" \
-    --arg device_name "${HOSTNAME}" \
+    --arg device_name "$device_name" \
     --arg model "apt-mqtt-updater" \
     --arg manufacturer "custom" \
-    --arg ip "$(hostname -I | awk '{print $1}')" \
+    --argjson ip_connections "$ip_connections" \
     '{name:$name, 
       platform:$platform, 
       state_topic:$state_topic, 
@@ -86,7 +117,7 @@ mqtt::publish_discovery() {
         model:$model, 
         manufacturer:$manufacturer,
         via_device:"apt_mqtt_daemon",
-        connections: [["ip",$ip]]
+        connections: $ip_connections
       }
     }')
 
