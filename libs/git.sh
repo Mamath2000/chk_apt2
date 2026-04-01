@@ -3,6 +3,24 @@
 git::require_repo() {
   local repo_dir="$1"
 
+  # If the repo is owned by a non-root user, run the check as that user so
+  # any user-specific git setup (SSH keys, worktrees) is respected.
+  local owner_user
+  owner_user=$(stat -c '%U' "$repo_dir" 2>/dev/null || true)
+
+  if [ -n "$owner_user" ] && [ "$owner_user" != "root" ]; then
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u "$owner_user" -- git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1
+      return $?
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo -u "$owner_user" -- git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1
+      return $?
+    elif command -v su >/dev/null 2>&1; then
+      su - "$owner_user" -s /bin/sh -c "git -C \"$repo_dir\" rev-parse --is-inside-work-tree" >/dev/null 2>&1
+      return $?
+    fi
+  fi
+
   git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
