@@ -20,7 +20,9 @@ La logique a été découpée par responsabilité :
 - libs/config.sh : lecture du fichier de configuration, application des valeurs par défaut, construction des topics dérivés.
 - libs/mqtt.sh : encapsulation de mosquitto_pub / mosquitto_sub et publication du payload Home Assistant.
 - libs/apt.sh : lecture des paquets upgradables, exécution de apt-get update, dist-upgrade et autoremove.
+- libs/git.sh : git pull local et redémarrage du service systemd.
 - libs/state.sh : lecture et écriture de state.json pour conserver une version installée stable côté Home Assistant.
+- libs/version.sh : gestion du fichier version et incrément de la release.
 - libs/tools.sh : fonctions génériques réutilisables, comme la vérification root, les dépendances et la normalisation du hostname.
 - install_service.sh : génération et suppression de l'unité systemd avec chemins absolus corrects.
 
@@ -41,6 +43,8 @@ Après chargement, le script calcule les variables dérivées :
 - HOST_SAFENAME : version nettoyée pour MQTT
 - CLIENT_ID : identifiant client utilisé par mosquitto_pub et mosquitto_sub
 - STATE_TOPIC, ATTR_TOPIC, CMD_TOPIC, AVAIL_TOPIC : topics complets
+- VERSION_TOPIC : topic du sensor de version du script
+- GLOBAL_UPDATE_TOPIC : topic global utilisé par le bouton de self-update
 
 Le topic de base final suit la forme :
 
@@ -89,6 +93,7 @@ Le démon ouvre une souscription MQTT sur le topic de commande. Les payloads sui
 - install, update, upgrade : exécution réelle
 - dry-run, simulate : simulation via apt-get -s dist-upgrade
 - check, status : publication immédiate de l'état
+- self-update, update-script, update-scripts, git-pull : git pull du dépôt local puis redémarrage du service
 
 Lors d'une mise à jour réelle, le flux est :
 
@@ -98,6 +103,26 @@ Lors d'une mise à jour réelle, le flux est :
 4. Exécution éventuelle de apt-get -y autoremove si activée.
 5. Mise à jour de state.json si l'opération a réussi.
 6. Suppression du marqueur puis publication des attributs d'exécution et de l'état final.
+
+## Mise à jour des scripts
+
+Le device principal expose un bouton Home Assistant qui publie self-update sur le topic global configuré.
+
+Chaque daemon est abonné à ce topic global en plus de son topic de commande propre à l'hôte. Lorsqu'il reçoit ce message, il :
+
+1. lance git pull --ff-only dans le répertoire d'installation configuré ;
+2. republie ses attributs et sa version ;
+3. redémarre le service systemd configuré.
+
+## Version du script
+
+Le fichier [version](version) contient la version logique du script déployé.
+
+Cette version est :
+
+- lue au démarrage et pendant les publications MQTT ;
+- publiée dans un sensor Home Assistant de diagnostic lié au device de l'hôte ;
+- incrémentée via le script release_push.sh avant envoi au dépôt distant.
 
 ## Points d'attention
 

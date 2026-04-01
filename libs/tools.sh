@@ -4,9 +4,9 @@ tools::check_requirements() {
   local missing=0
   local cmd
 
-  for cmd in mosquitto_pub mosquitto_sub jq apt-get apt; do
+  for cmd in mosquitto_pub mosquitto_sub jq apt-get apt git systemctl; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
-      echo "Erreur: la commande '$cmd' est requise. Installez 'mosquitto-clients' et 'jq'." >&2
+      echo "Erreur: la commande '$cmd' est requise. Installez les dépendances système nécessaires." >&2
       missing=1
     fi
   done
@@ -21,6 +21,14 @@ tools::require_root() {
     echo "Ce script doit être exécuté en root (sudo)." >&2
     exit 1
   fi
+}
+
+tools::log() {
+  local level="${1:-INFO}"; shift || true
+  local msg="$*"
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  printf '%s [%s] %s\n' "$ts" "$level" "$msg"
 }
 
 tools::sanitize_hostname() {

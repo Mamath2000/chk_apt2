@@ -14,11 +14,14 @@ Le démon publie :
 - libs/config.sh : chargement de la configuration et calcul des topics MQTT.
 - libs/mqtt.sh : publication MQTT et payload de discovery Home Assistant.
 - libs/apt.sh : interrogation APT et exécution des mises à jour.
+- libs/git.sh : mise à jour du dépôt et redémarrage du service.
 - libs/state.sh : persistance de la version installée dans state.json.
+- libs/version.sh : lecture et incrément de la version stockée dans version.
 - libs/tools.sh : utilitaires génériques.
 - config.conf.example : exemple de configuration.
 - apt-mqtt.service : unité systemd d'exemple.
 - install_service.sh : installe ou supprime l'unité systemd avec les bons chemins.
+- release_push.sh : incrémente la release puis pousse le dépôt.
 
 ## Dépendances
 
@@ -26,7 +29,7 @@ Paquets système requis sur Debian/Ubuntu :
 
 ```bash
 sudo apt update
-sudo apt install -y mosquitto-clients jq
+sudo apt install -y mosquitto-clients jq git systemd
 ```
 
 ## Configuration
@@ -51,8 +54,11 @@ Variables principales :
 - MQTT_PORT : port du broker.
 - MQTT_USERNAME / MQTT_PASSWORD : authentification éventuelle.
 - MQTT_BASE_TOPIC : racine des topics publiés.
+- MQTT_GLOBAL_UPDATE_TOPIC : topic global du bouton de mise à jour des scripts.
 - OBJECT_ID : identifiant de l'entité Home Assistant.
 - CHECK_INTERVAL : délai entre deux publications d'état.
+- APT_MQTT_SERVICE_NAME : nom du service systemd à redémarrer après git pull.
+- APT_MQTT_INSTALL_DIR : répertoire du dépôt local à mettre à jour.
 
 Le hostname est normalisé puis ajouté automatiquement au topic de base.
 
@@ -110,6 +116,21 @@ Commandes acceptées sur le topic de commande :
 - install, update, upgrade : lance apt-get update puis apt-get -y dist-upgrade
 - dry-run, simulate : simulation sans changement
 - check, status : republie l'état immédiatement
+- self-update, update-script, update-scripts, git-pull : fait un git pull puis redémarre le service
+
+Le device principal publie aussi un bouton Home Assistant qui envoie self-update sur le topic global configuré. Chaque daemon abonné à ce topic exécute alors le git pull de son répertoire d'installation puis redémarre son service.
+
+## Version du script
+
+La version du code est stockée dans le fichier [version](version) et publiée dans Home Assistant via un sensor diagnostic associé au device de chaque hôte.
+
+Pour incrémenter automatiquement la release avant un push, utilisez :
+
+```bash
+./release_push.sh
+```
+
+Ce script incrémente le patch de version, commit le fichier version puis pousse le dépôt.
 
 ## Documentation détaillée
 

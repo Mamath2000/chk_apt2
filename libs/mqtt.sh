@@ -17,10 +17,21 @@ mqtt::sub() {
   mosquitto_sub "${args[@]}"
 }
 
+mqtt::sub_many() {
+  local args=( -h "$BROKER" -p "$PORT" -i "${CLIENT_ID}_sub" )
+  local topic
+
+  if [ -n "$USERNAME" ]; then args+=( -u "$USERNAME" -P "$PASSWORD" ); fi
+  for topic in "$@"; do
+    args+=( -t "$topic" )
+  done
+  mosquitto_sub "${args[@]}"
+}
+
 mqtt::device_ip_connections() {
   local ip_list ip_prefix
 
-  ip_prefix="${MQTT_DEVICE_IP_PREFIX:-192.169.}"
+  ip_prefix="${MQTT_DEVICE_IP_PREFIX:-192.168.}"
 
   ip_list=$(hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^$/d' | grep "^${ip_prefix//./\\.}" || true)
   if [ -z "$ip_list" ]; then
@@ -50,6 +61,7 @@ mqtt::publish_main_device_discovery() {
   # Entity name = hostname; device is global and represents the update script
   update_json=$(jq -n \
     --arg name "APT Updater Daemon" \
+    --arg global_update_topic "$GLOBAL_UPDATE_TOPIC" \
     '{device:{
           identifiers:["apt_mqtt_daemon"], 
         name:$name, 
@@ -69,6 +81,15 @@ mqtt::publish_main_device_discovery() {
               "payload_off": "offline",
               "device_class": "connectivity",
               "icon": "mdi:server-network"
+              },
+            "apt_mqtt_daemon_update_all": {
+                "platform": "button",
+                "unique_id": "apt_mqtt_daemon_update_all",
+                "default_entity_id": "button.apt_mqtt_daemon_update_all",
+                "name": "Mettre a jour les scripts",
+                "command_topic": $global_update_topic,
+                "payload_press": "self-update",
+                "icon": "mdi:update"
             }
         }
     }')
@@ -78,7 +99,7 @@ mqtt::publish_main_device_discovery() {
   mqtt::pub "homeassistant/device/apt_mqtt_daemon/main/config" "$update_json" true
 }
 
-mqtt::publish_discovery() {
+mqtt::publish_host_device_discovery() {
   local update_json ip_connections device_name
   ip_connections="$(mqtt::device_ip_connections)"
   device_name="$(mqtt::display_hostname "$HOSTNAME")"
@@ -92,25 +113,17 @@ mqtt::publish_discovery() {
     --arg availability_topic "$AVAIL_TOPIC" \
     --arg command_topic "$CMD_TOPIC" \
     --arg payload_install "install" \
-    --arg unique_id "${OBJECT_ID}_${HOST_SAFENAME}_update" \
-    --arg default_entity_id "update.${OBJECT_ID}_${HOST_SAFENAME}_update" \
     --arg device_id "${OBJECT_ID}_${HOST_SAFENAME}" \
     --arg device_name "$device_name" \
     --arg model "apt-mqtt-updater" \
     --arg manufacturer "custom" \
+    --arg version_topic "$VERSION_TOPIC" \
+    --arg update_unique_id "${OBJECT_ID}_${HOST_SAFENAME}_update" \
+    --arg update_object_id "update.${OBJECT_ID}_${HOST_SAFENAME}_update" \
+    --arg version_unique_id "${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
+    --arg version_object_id "sensor.${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
     --argjson ip_connections "$ip_connections" \
-    '{name:$name, 
-      platform:$platform, 
-      state_topic:$state_topic, 
-      value_template:"{{ value_json.installed_version }}",
-      latest_version_topic:$state_topic, 
-      latest_version_template:"{{ value_json.latest_version }}",
-      json_attributes_topic:$json_attributes_topic, 
-      availability_topic:$availability_topic, 
-      command_topic:$command_topic, 
-      payload_install:$payload_install, 
-      unique_id:$unique_id, 
-      default_entity_id:$default_entity_id, 
+    '{ 
       device:{
         identifiers:[$device_id], 
         name:$device_name, 
@@ -118,10 +131,71 @@ mqtt::publish_discovery() {
         manufacturer:$manufacturer,
         via_device:"apt_mqtt_daemon",
         connections: $ip_connections
-      }
+      },
+      origin: {name: "APT MQTT Updater"},
+      components:{
+        "${device_id}_update": {
+          platform:$platform, 
+          name:$name, 
+          value_template:"{{ value_json.installed_version }}",
+          latest_version_topic:$state_topic, 
+          state_topic:$state_topic, 
+          latest_version_template:"{{ value_json.latest_version }}",
+          json_attributes_topic:$json_attributes_topic, 
+          availability_topic:$availability_topic, 
+          command_topic:$command_topic, 
+          payload_install:$payload_install, 
+          unique_id:$update_unique_id, 
+          default_entity_id:$update_object_id
+        },
+        "${device_id}_script_version": {
+          platform: "sensor",
+          name: "Version du script",
+          state_topic:$version_topic, 
+          availability_topic:$availability_topic,
+          entity_category: "diagnostic",
+          icon: "mdi:source-branch",
+          unique_id: $version_unique_id,
+          default_entity_id: $version_object_id
+        }
+        }
     }')
 
   # Publish only the update entity via MQTT discovery (no separate button)
   # Use a discovery topic unique per host so multiple servers don't overwrite each other
-  mqtt::pub "homeassistant/update/${OBJECT_ID}/${HOST_SAFENAME}/config" "$update_json" true
+  mqtt::pub "homeassistant/device/${OBJECT_ID}/${HOST_SAFENAME}/config" "$update_json" true
 }
+
+
+# mqtt::publish_version_sensor_discovery() {
+#   local sensor_json device_name
+
+#   device_name="$(mqtt::display_hostname "$HOSTNAME")"
+#   sensor_json=$(jq -n \
+#     --arg name "Version du script" \
+#     --arg unique_id "${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
+#     --arg default_entity_id "sensor.${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
+#     --arg state_topic "$VERSION_TOPIC" \
+#     --arg availability_topic "$AVAIL_TOPIC" \
+#     --arg device_id "${OBJECT_ID}_${HOST_SAFENAME}" \
+#     --arg device_name "$device_name" \
+#     --arg model "apt-mqtt-updater" \
+#     --arg manufacturer "custom" \
+#     '{name:$name,
+#       unique_id:$unique_id,
+#       default_entity_id:$default_entity_id,
+#       state_topic:$state_topic,
+#       availability_topic:$availability_topic,
+#       entity_category:"diagnostic",
+#       icon:"mdi:source-branch",
+#       device:{
+#         identifiers:[$device_id],
+#         name:$device_name,
+#         model:$model,
+#         manufacturer:$manufacturer,
+#         via_device:"apt_mqtt_daemon"
+#       }
+#     }')
+
+#   mqtt::pub "homeassistant/sensor/${OBJECT_ID}/${HOST_SAFENAME}_script_version/config" "$sensor_json" true
+# }

@@ -11,9 +11,12 @@ MQTT_PASSWORD=
 MQTT_BASE_TOPIC=apt-update
 OBJECT_ID=apt_update
 MQTT_CLIENT_ID=apt_mqtt_$(hostname -s)
+MQTT_GLOBAL_UPDATE_TOPIC=apt-update/global/update
 
 # Daemon behavior
 CHECK_INTERVAL=3600
+APT_MQTT_SERVICE_NAME=apt-mqtt.service
+APT_MQTT_INSTALL_DIR=
 
 # Notes:
 # - The final runtime topic becomes <MQTT_BASE_TOPIC>/<sanitized-hostname>/...
