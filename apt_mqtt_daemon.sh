@@ -224,6 +224,9 @@ main() {
     publish_status
     # No automatic upgrades: manual trigger via MQTT `command_topic` only.
     sleep "$CHECK_INTERVAL"
+    # Après la tempo, relance le script lui-même
+    tools::log INFO "Relance automatique du script après tempo ($CHECK_INTERVAL s)"
+    exec "$0" "$@"
   done
 }
 
