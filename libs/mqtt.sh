@@ -110,12 +110,23 @@ mqtt::publish_main_device_discovery() {
 }
 
 mqtt::publish_host_device_discovery() {
-  local update_json ip_connections device_name
+  local base_components base_components_file components_file docker_components docker_components_file ip_connections ip_connections_file normalized_docker_components update_json device_name
+  docker_components="${1:-"{}"}"
   ip_connections="$(mqtt::device_ip_connections)"
   device_name="$(mqtt::display_hostname "$HOSTNAME")"
+  if normalized_docker_components="$(printf '%s' "$docker_components" | jq -c '.' 2>/dev/null)"; then
+    docker_components="$normalized_docker_components"
+  else
+    docker_components='{}'
+  fi
+  base_components_file="$(mktemp)"
+  docker_components_file="$(mktemp)"
+  components_file="$(mktemp)"
+  ip_connections_file="$(mktemp)"
 
-  # Entity name = hostname; device is global and represents the update script
-  update_json=$(jq -n \
+  base_components=$(jq -n \
+    --arg update_key "${OBJECT_ID}_${HOST_SAFENAME}_update" \
+    --arg version_key "${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
     --arg name "Apt update" \
     --arg platform "update" \
     --arg state_topic "$STATE_TOPIC" \
@@ -123,16 +134,51 @@ mqtt::publish_host_device_discovery() {
     --arg availability_topic "$AVAIL_TOPIC" \
     --arg command_topic "$CMD_TOPIC" \
     --arg payload_install "install" \
+    --arg update_unique_id "${OBJECT_ID}_${HOST_SAFENAME}_update" \
+    --arg update_object_id "update.${OBJECT_ID}_${HOST_SAFENAME}_update" \
+    --arg version_topic "$VERSION_TOPIC" \
+    --arg version_unique_id "${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
+    --arg version_object_id "sensor.${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
+    '{
+      ($update_key): {
+        platform:$platform,
+        name:$name,
+        value_template:"{{ value_json.installed_version }}",
+        latest_version_topic:$state_topic,
+        state_topic:$state_topic,
+        latest_version_template:"{{ value_json.latest_version }}",
+        json_attributes_topic:$json_attributes_topic,
+        availability_topic:$availability_topic,
+        command_topic:$command_topic,
+        payload_install:$payload_install,
+        unique_id:$update_unique_id,
+        default_entity_id:$update_object_id
+      },
+      ($version_key): {
+        platform:"sensor",
+        name:"Update script (ver)",
+        state_topic:$version_topic,
+        availability_topic:$availability_topic,
+        entity_category:"diagnostic",
+        icon:"mdi:source-branch",
+        unique_id:$version_unique_id,
+        default_entity_id:$version_object_id
+      }
+    }')
+
+  printf '%s' "$base_components" > "$base_components_file"
+  printf '%s' "$docker_components" > "$docker_components_file"
+  printf '%s' "$ip_connections" > "$ip_connections_file"
+  jq -s '.[0] + .[1]' "$base_components_file" "$docker_components_file" > "$components_file"
+
+  # Entity name = hostname; device is global and represents the update script
+  update_json=$(jq -n \
+    --slurpfile components "$components_file" \
+    --slurpfile ip_connections "$ip_connections_file" \
     --arg device_id "${OBJECT_ID}_${HOST_SAFENAME}" \
     --arg device_name "$device_name" \
     --arg model "apt-mqtt-updater" \
     --arg manufacturer "custom" \
-    --arg version_topic "$VERSION_TOPIC" \
-    --arg update_unique_id "${OBJECT_ID}_${HOST_SAFENAME}_update" \
-    --arg update_object_id "update.${OBJECT_ID}_${HOST_SAFENAME}_update" \
-    --arg version_unique_id "${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
-    --arg version_object_id "sensor.${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
-    --argjson ip_connections "$ip_connections" \
     '{ 
       device:{
         identifiers:[$device_id], 
@@ -140,36 +186,12 @@ mqtt::publish_host_device_discovery() {
         model:$model, 
         manufacturer:$manufacturer,
         via_device:"apt_mqtt_daemon",
-        connections: $ip_connections
+        connections: ($ip_connections[0] // [])
       },
       origin: {name: "APT MQTT Updater"},
-      components:{
-        "${device_id}_update": {
-          platform:$platform, 
-          name:$name, 
-          value_template:"{{ value_json.installed_version }}",
-          latest_version_topic:$state_topic, 
-          state_topic:$state_topic, 
-          latest_version_template:"{{ value_json.latest_version }}",
-          json_attributes_topic:$json_attributes_topic, 
-          availability_topic:$availability_topic, 
-          command_topic:$command_topic, 
-          payload_install:$payload_install, 
-          unique_id:$update_unique_id, 
-          default_entity_id:$update_object_id
-        },
-        "${device_id}_script_version": {
-          platform: "sensor",
-          name: "Update script (ver)",
-          state_topic:$version_topic, 
-          availability_topic:$availability_topic,
-          entity_category: "diagnostic",
-          icon: "mdi:source-branch",
-          unique_id: $version_unique_id,
-          default_entity_id: $version_object_id
-        }
-        }
+      components: ($components[0] // {})
     }')
+  rm -f "$base_components_file" "$docker_components_file" "$components_file" "$ip_connections_file"
 
   # Publish only the update entity via MQTT discovery (no separate button)
   # Use a discovery topic unique per host so multiple servers don't overwrite each other

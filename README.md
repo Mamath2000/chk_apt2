@@ -2,6 +2,8 @@
 
 Ce projet fournit un démon Bash qui surveille les mises à jour APT disponibles et expose cet état via MQTT pour Home Assistant.
 
+Si Docker Compose est disponible sur l'hôte, le démon expose aussi une entité update Home Assistant par stack docker-compose détectée dans un périmètre strict.
+
 Le démon publie :
 
 - une entité Home Assistant de type update via MQTT Discovery ;
@@ -14,6 +16,7 @@ Le démon publie :
 - libs/config.sh : chargement de la configuration et calcul des topics MQTT.
 - libs/mqtt.sh : publication MQTT et payload de discovery Home Assistant.
 - libs/apt.sh : interrogation APT et exécution des mises à jour.
+- libs/docker.sh : détection des stacks Docker Compose, résolution des digests d'images et mise à jour des stacks.
 - libs/git.sh : mise à jour du dépôt et redémarrage du service.
 - libs/state.sh : persistance de la version installée dans state.json.
 - libs/version.sh : lecture et incrément de la version stockée dans version.
@@ -31,6 +34,8 @@ Paquets système requis sur Debian/Ubuntu :
 sudo apt update
 sudo apt install -y mosquitto-clients jq git systemd
 ```
+
+Pour la supervision Docker Compose, Docker doit être installé avec la commande `docker compose` ou `docker-compose`.
 
 ## Configuration
 
@@ -61,6 +66,26 @@ Variables principales :
 - APT_MQTT_INSTALL_DIR : répertoire du dépôt local à mettre à jour.
 
 Le hostname est normalisé puis ajouté automatiquement au topic de base.
+
+## Supervision Docker Compose
+
+Si Docker Compose est disponible, le démon ne cherche les fichiers que dans les chemins suivants :
+
+- /root/docker-compose.yml
+- /root/*/docker-compose.yml
+- /home/mamath/docker-compose.yml
+- /home/mamath/*/docker-compose.yml
+
+Il ne scanne aucun autre répertoire.
+
+Pour chaque stack trouvée, le démon :
+
+- résout les images du compose avec leurs digests distants ;
+- compare ces digests avec ceux actuellement déployés pour la stack ;
+- publie une entité Home Assistant de type update dédiée ;
+- accepte une commande de mise à jour qui exécute `docker compose pull --include-deps` puis `docker compose up -d`.
+
+Comme pour APT, la version exposée à Home Assistant est une version logique persistée dans state.json. Elle est incrémentée quand une mise à jour Docker est effectivement appliquée par le démon.
 
 ## Exécution
 
@@ -115,10 +140,13 @@ Commandes acceptées sur le topic de commande :
 
 - install, update, upgrade : lance apt-get update puis apt-get -y dist-upgrade
 - dry-run, simulate : simulation sans changement
+- docker-install:<stack-id> : met à jour une stack Docker Compose précise
 - check, status : republie l'état immédiatement
 - self-update, update-script, update-scripts, git-pull : fait un git pull puis redémarre le service
 
 Le device principal publie aussi un bouton Home Assistant qui envoie self-update sur le topic global configuré. Chaque daemon abonné à ce topic exécute alors le git pull de son répertoire d'installation puis redémarre son service.
+
+Les entités Docker Compose sont publiées sur le device de l'hôte, avec un topic dédié par stack sous la forme `.../docker/<stack-id>/state` et `.../docker/<stack-id>/attributes`.
 
 ## Version du script
 

@@ -2,6 +2,7 @@
 # System packages required (Debian/Ubuntu):
 # - mosquitto-clients (fournit mosquitto_pub / mosquitto_sub)
 # - jq (formatage JSON)
+# - docker.io + docker-compose-plugin ou docker-compose (optionnel, pour la supervision Docker Compose)
 mosquitto-clients
 jq
 
