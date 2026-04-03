@@ -199,7 +199,7 @@ main() {
       if read -r payload <"$CMD_FIFO"; then
         payload_lc=$(printf '%s' "$payload" | tr '[:upper:]' '[:lower:]' | tr -d '\r')
         case "$payload_lc" in
-          install|update|upgrade)
+          install|update|upgrade|upgrade-all)
             handle_install false &
             ;;
           dry-run|simulate)

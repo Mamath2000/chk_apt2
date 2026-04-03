@@ -90,7 +90,17 @@ mqtt::publish_main_device_discovery() {
                 "command_topic": $global_update_topic,
                 "payload_press": "self-update",
                 "icon": "mdi:update"
+            },
+            "apt_mqtt_daemon_upgrade_all": {
+                "platform": "button",
+                "unique_id": "apt_mqtt_daemon_upgrade_all",
+                "default_entity_id": "button.apt_mqtt_daemon_upgrade_all",
+                "name": "Exécuter les mises à jour (apt)",
+                "command_topic": $global_update_topic,
+                "payload_press": "upgrade-all",
+                "icon": "mdi:update"
             }
+
         }
     }')
 

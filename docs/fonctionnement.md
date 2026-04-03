@@ -88,9 +88,9 @@ La version installée est volontairement persistée dans state.json. Cela évite
 
 ## Déclenchement des mises à jour
 
-Le démon ouvre une souscription MQTT sur le topic de commande. Les payloads suivants sont interprétés :
+Le démon ouvre une souscription MQTT sur le topic de commande propre à l'hôte et sur le topic global configuré. Les payloads suivants sont interprétés :
 
-- install, update, upgrade : exécution réelle
+- install, update, upgrade, upgrade-all : exécution réelle
 - dry-run, simulate : simulation via apt-get -s dist-upgrade
 - check, status : publication immédiate de l'état
 - self-update, update-script, update-scripts, git-pull : git pull du dépôt local puis redémarrage du service
@@ -104,15 +104,16 @@ Lors d'une mise à jour réelle, le flux est :
 5. Mise à jour de state.json si l'opération a réussi.
 6. Suppression du marqueur puis publication des attributs d'exécution et de l'état final.
 
-## Mise à jour des scripts
+## Commandes globales
 
-Le device principal expose un bouton Home Assistant qui publie self-update sur le topic global configuré.
+Le device principal expose des boutons Home Assistant qui publient sur le topic global configuré.
 
-Chaque daemon est abonné à ce topic global en plus de son topic de commande propre à l'hôte. Lorsqu'il reçoit ce message, il :
+Chaque daemon est abonné à ce topic global en plus de son topic de commande propre à l'hôte.
 
-1. lance git pull --ff-only dans le répertoire d'installation configuré ;
-2. republie ses attributs et sa version ;
-3. redémarre le service systemd configuré.
+- self-update : lance git pull --ff-only dans le répertoire d'installation configuré, republie ses attributs et sa version, puis redémarre le service systemd configuré.
+- upgrade-all : lance le même flux que install/update/upgrade, donc apt-get update puis apt-get -y dist-upgrade sur chaque hôte abonné.
+
+Le bouton principal `upgrade-all` permet donc de déclencher une mise à jour APT sur tous les daemons qui écoutent ce topic global.
 
 ## Version du script
 
