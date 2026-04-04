@@ -2,7 +2,7 @@
 
 config::load() {
   local script_dir="$1"
-  local cfg
+  local cfg requested_log_level
 
   CONFIG_CANDIDATES=()
   if [ -n "${APT_MQTT_CONFIG:-}" ]; then
@@ -22,22 +22,41 @@ config::load() {
   PORT="${MQTT_PORT:-1883}"
   USERNAME="${MQTT_USERNAME:-}"
   PASSWORD="${MQTT_PASSWORD:-}"
-  BASE_TOPIC="${MQTT_BASE_TOPIC:-apt-update}"
-  BASE_ROOT_TOPIC="$BASE_TOPIC"
-  OBJECT_ID="${OBJECT_ID:-apt_update}"
   CHECK_INTERVAL="${CHECK_INTERVAL:-3600}"
   INSTALL_DIR="${APT_MQTT_INSTALL_DIR:-$script_dir}"
-  SERVICE_NAME="${APT_MQTT_SERVICE_NAME:-apt-mqtt.service}"
+  SERVICE_NAME="apt-mqtt.service"
+  DOCKER_SERVICE_NAME="docker-mqtt.service"
+
+  requested_log_level="${APT_MQTT_LOG_LEVEL:-${LOG_LEVEL:-INFO}}"
+  LOG_LEVEL="$(tools::normalize_log_level "$requested_log_level")"
 
   HOSTNAME="$(hostname -s)"
   HOST_SAFENAME="$(tools::sanitize_hostname "$HOSTNAME")"
-  CLIENT_ID="${MQTT_CLIENT_ID:-apt_mqtt_${HOST_SAFENAME}}"
 
-  BASE_TOPIC="${BASE_TOPIC%/}/${HOST_SAFENAME}"
+  GLOBAL_UPDATE_TOPIC="apt-update/global/update"
+  DOCKER_GLOBAL_UPDATE_TOPIC="docker-update/global/update"
+
+  config::apply_apt_defaults
+}
+
+config::apply_apt_defaults() {
+  BASE_ROOT_TOPIC="apt-update"
+  OBJECT_ID="apt_update"
+  BASE_TOPIC="${BASE_ROOT_TOPIC%/}/${HOST_SAFENAME}"
   STATE_TOPIC="$BASE_TOPIC/state"
   ATTR_TOPIC="$BASE_TOPIC/attributes"
   CMD_TOPIC="$BASE_TOPIC/command"
   AVAIL_TOPIC="$BASE_TOPIC/availability"
   VERSION_TOPIC="$BASE_TOPIC/script_version"
-  GLOBAL_UPDATE_TOPIC="${MQTT_GLOBAL_UPDATE_TOPIC:-${BASE_ROOT_TOPIC%/}/global/update}"
+}
+
+config::apply_docker_defaults() {
+  BASE_ROOT_TOPIC="docker-update"
+  OBJECT_ID="docker_update"
+  BASE_TOPIC="${BASE_ROOT_TOPIC%/}/${HOST_SAFENAME}"
+  STATE_TOPIC="$BASE_TOPIC/state"
+  ATTR_TOPIC="$BASE_TOPIC/attributes"
+  CMD_TOPIC="$BASE_TOPIC/command"
+  AVAIL_TOPIC="$BASE_TOPIC/availability"
+  VERSION_TOPIC="$BASE_TOPIC/script_version"
 }

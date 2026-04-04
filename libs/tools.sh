@@ -1,10 +1,54 @@
 #!/usr/bin/env bash
 
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
+tools::normalize_log_level() {
+  case "$(printf '%s' "${1:-INFO}" | tr '[:lower:]' '[:upper:]')" in
+    DEBUG)
+      printf 'DEBUG'
+      ;;
+    INFO)
+      printf 'INFO'
+      ;;
+    WARN|WARNING)
+      printf 'WARN'
+      ;;
+    ERROR)
+      printf 'ERROR'
+      ;;
+    *)
+      printf 'INFO'
+      ;;
+  esac
+}
+
+tools::log_level_value() {
+  case "$(tools::normalize_log_level "$1")" in
+    DEBUG)
+      printf '10'
+      ;;
+    INFO)
+      printf '20'
+      ;;
+    WARN)
+      printf '30'
+      ;;
+    ERROR)
+      printf '40'
+      ;;
+  esac
+}
+
 tools::check_requirements() {
   local missing=0
   local cmd
+  local required_commands=("$@")
 
-  for cmd in mosquitto_pub mosquitto_sub jq apt-get apt git systemctl; do
+  if [ "${#required_commands[@]}" -eq 0 ]; then
+    required_commands=(mosquitto_pub mosquitto_sub jq)
+  fi
+
+  for cmd in "${required_commands[@]}"; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       echo "Erreur: la commande '$cmd' est requise. Installez les dépendances système nécessaires." >&2
       missing=1
@@ -24,11 +68,20 @@ tools::require_root() {
 }
 
 tools::log() {
-  local level="${1:-INFO}"; shift || true
-  local msg="$*"
-  local ts
+  local level current_level_value message_level_value msg ts
+
+  level="$(tools::normalize_log_level "${1:-INFO}")"
+  shift || true
+  msg="$*"
+
+  current_level_value="$(tools::log_level_value "${LOG_LEVEL:-INFO}")"
+  message_level_value="$(tools::log_level_value "$level")"
+  if [ "$message_level_value" -lt "$current_level_value" ]; then
+    return
+  fi
+
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  printf '%s [%s] %s\n' "$ts" "$level" "$msg"
+  printf '%s [%s] %s\n' "$ts" "$level" "$msg" >&2
 }
 
 tools::sanitize_hostname() {

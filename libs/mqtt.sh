@@ -7,13 +7,24 @@ mqtt::pub() {
   local args=( -h "$BROKER" -p "$PORT" -i "$CLIENT_ID" )
   if [ -n "$USERNAME" ]; then args+=( -u "$USERNAME" -P "$PASSWORD" ); fi
   if [ "$retain" = true ]; then args+=( -r ); fi
+  tools::log DEBUG "MQTT publish: topic=$topic retain=$retain payload_bytes=${#payload}"
   mosquitto_pub "${args[@]}" -t "$topic" -m "$payload"
+}
+
+mqtt::clear_retained() {
+  local topic="$1"
+  local args=( -h "$BROKER" -p "$PORT" -i "$CLIENT_ID" )
+
+  if [ -n "$USERNAME" ]; then args+=( -u "$USERNAME" -P "$PASSWORD" ); fi
+  tools::log DEBUG "MQTT clear retained: topic=$topic"
+  mosquitto_pub "${args[@]}" -t "$topic" -n -r
 }
 
 mqtt::sub() {
   local topic="$1"
   local args=( -h "$BROKER" -p "$PORT" -i "${CLIENT_ID}_sub" -t "$topic" )
   if [ -n "$USERNAME" ]; then args+=( -u "$USERNAME" -P "$PASSWORD" ); fi
+  tools::log DEBUG "MQTT subscribe: topic=$topic"
   mosquitto_sub "${args[@]}"
 }
 
@@ -25,6 +36,7 @@ mqtt::sub_many() {
   for topic in "$@"; do
     args+=( -t "$topic" )
   done
+  tools::log DEBUG "MQTT subscribe many: topics=$*"
   mosquitto_sub "${args[@]}"
 }
 
@@ -62,6 +74,7 @@ mqtt::publish_main_device_discovery() {
   update_json=$(jq -n \
     --arg name "APT Updater Daemon" \
     --arg global_update_topic "$GLOBAL_UPDATE_TOPIC" \
+    --arg docker_global_update_topic "$DOCKER_GLOBAL_UPDATE_TOPIC" \
     '{device:{
           identifiers:["apt_mqtt_daemon"], 
         name:$name, 
@@ -99,6 +112,15 @@ mqtt::publish_main_device_discovery() {
                 "command_topic": $global_update_topic,
                 "payload_press": "upgrade-all",
                 "icon": "mdi:update"
+            },
+            "apt_mqtt_daemon_docker_pull_all": {
+              "platform": "button",
+              "unique_id": "apt_mqtt_daemon_docker_pull_all",
+              "default_entity_id": "button.apt_mqtt_daemon_docker_pull_all",
+              "name": "Mettre a jour toutes les stacks Docker",
+              "command_topic": $docker_global_update_topic,
+              "payload_press": "pull-all",
+              "icon": "mdi:docker"
             }
 
         }
@@ -106,24 +128,62 @@ mqtt::publish_main_device_discovery() {
 
   # Publish only the update entity via MQTT discovery (no separate button)
   # Use a discovery topic unique per host so multiple servers don't overwrite each other
+  tools::log DEBUG "Publication discovery device principal"
   mqtt::pub "homeassistant/device/apt_mqtt_daemon/main/config" "$update_json" true
 }
 
-mqtt::publish_host_device_discovery() {
-  local base_components base_components_file components_file docker_components docker_components_file ip_connections ip_connections_file normalized_docker_components update_json device_name
-  docker_components="${1:-"{}"}"
-  ip_connections="$(mqtt::device_ip_connections)"
-  device_name="$(mqtt::display_hostname "$HOSTNAME")"
-  if normalized_docker_components="$(printf '%s' "$docker_components" | jq -c '.' 2>/dev/null)"; then
-    docker_components="$normalized_docker_components"
-  else
-    docker_components='{}'
-  fi
-  base_components_file="$(mktemp)"
-  docker_components_file="$(mktemp)"
-  components_file="$(mktemp)"
-  ip_connections_file="$(mktemp)"
+mqtt::publish_components_device_discovery() {
+  local discovery_object_id="$1"
+  local device_id="$2"
+  local device_name="$3"
+  local model="$4"
+  local manufacturer="$5"
+  local via_device="$6"
+  local components_json="${7:-"{}"}"
+  local ip_connections ip_connections_file components_file normalized_components update_json
 
+  ip_connections="$(mqtt::device_ip_connections)"
+  if normalized_components="$(printf '%s' "$components_json" | jq -c '.' 2>/dev/null)"; then
+    components_json="$normalized_components"
+  else
+    components_json='{}'
+  fi
+
+  ip_connections_file="$(mktemp)"
+  components_file="$(mktemp)"
+
+  printf '%s' "$components_json" > "$components_file"
+  printf '%s' "$ip_connections" > "$ip_connections_file"
+  tools::log DEBUG "Publication discovery hôte: composants=$(jq 'keys | length' "$components_file")"
+
+  update_json=$(jq -n \
+    --slurpfile components "$components_file" \
+    --slurpfile ip_connections "$ip_connections_file" \
+    --arg device_id "$device_id" \
+    --arg device_name "$device_name" \
+    --arg model "$model" \
+    --arg manufacturer "$manufacturer" \
+    --arg via_device "$via_device" \
+    '{
+      device:({
+        identifiers:[$device_id], 
+        name:$device_name, 
+        model:$model, 
+        manufacturer:$manufacturer,
+        connections: ($ip_connections[0] // [])
+      } | if $via_device != "" then . + {via_device:$via_device} else . end),
+      origin: {name: "APT MQTT Updater"},
+      components: ($components[0] // {})
+    }')
+  rm -f "$components_file" "$ip_connections_file"
+
+  mqtt::pub "homeassistant/device/${discovery_object_id}/${HOST_SAFENAME}/config" "$update_json" true
+}
+
+mqtt::publish_host_device_discovery() {
+  local base_components device_name
+
+  device_name="$(mqtt::display_hostname "$HOSTNAME")"
   base_components=$(jq -n \
     --arg update_key "${OBJECT_ID}_${HOST_SAFENAME}_update" \
     --arg version_key "${OBJECT_ID}_${HOST_SAFENAME}_script_version" \
@@ -166,36 +226,30 @@ mqtt::publish_host_device_discovery() {
       }
     }')
 
-  printf '%s' "$base_components" > "$base_components_file"
-  printf '%s' "$docker_components" > "$docker_components_file"
-  printf '%s' "$ip_connections" > "$ip_connections_file"
-  jq -s '.[0] + .[1]' "$base_components_file" "$docker_components_file" > "$components_file"
+  mqtt::publish_components_device_discovery \
+    "$OBJECT_ID" \
+    "${OBJECT_ID}_${HOST_SAFENAME}" \
+    "$device_name" \
+    "apt-mqtt-updater" \
+    "custom" \
+    "apt_mqtt_daemon" \
+    "$base_components"
+}
 
-  # Entity name = hostname; device is global and represents the update script
-  update_json=$(jq -n \
-    --slurpfile components "$components_file" \
-    --slurpfile ip_connections "$ip_connections_file" \
-    --arg device_id "${OBJECT_ID}_${HOST_SAFENAME}" \
-    --arg device_name "$device_name" \
-    --arg model "apt-mqtt-updater" \
-    --arg manufacturer "custom" \
-    '{ 
-      device:{
-        identifiers:[$device_id], 
-        name:$device_name, 
-        model:$model, 
-        manufacturer:$manufacturer,
-        via_device:"apt_mqtt_daemon",
-        connections: ($ip_connections[0] // [])
-      },
-      origin: {name: "APT MQTT Updater"},
-      components: ($components[0] // {})
-    }')
-  rm -f "$base_components_file" "$docker_components_file" "$components_file" "$ip_connections_file"
+mqtt::publish_docker_device_discovery() {
+  local docker_components="$1"
+  local device_name
 
-  # Publish only the update entity via MQTT discovery (no separate button)
-  # Use a discovery topic unique per host so multiple servers don't overwrite each other
-  mqtt::pub "homeassistant/device/${OBJECT_ID}/${HOST_SAFENAME}/config" "$update_json" true
+  device_name="$(mqtt::display_hostname "$HOSTNAME")"
+
+  mqtt::publish_components_device_discovery \
+    "${OBJECT_ID}_docker" \
+    "${OBJECT_ID}_${HOST_SAFENAME}_docker" \
+    "$device_name" \
+    "docker-mqtt-updater" \
+    "custom" \
+    "apt_mqtt_daemon" \
+    "$docker_components"
 }
 
 

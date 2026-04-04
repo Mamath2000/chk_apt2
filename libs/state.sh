@@ -6,9 +6,17 @@ IN_PROGRESS_FILE=""
 
 state::init_paths() {
   local base_dir="$1"
+  local namespace="${2:-}"
+
   STATE_DIR="$base_dir"
-  STATE_FILE="$base_dir/state.json"
-  IN_PROGRESS_FILE="$base_dir/.in_progress"
+
+  if [ -n "$namespace" ]; then
+    STATE_FILE="$base_dir/${namespace}_state.json"
+    IN_PROGRESS_FILE="$base_dir/.${namespace}_in_progress"
+  else
+    STATE_FILE="$base_dir/state.json"
+    IN_PROGRESS_FILE="$base_dir/.in_progress"
+  fi
 }
 
 state::ensure_dir() {
@@ -62,7 +70,7 @@ state::ensure_docker_stack() {
 
   json="$(state::read_json | jq -c --arg id "$stack_id" --arg version "1.0.0" --argjson images "$deployed_images_json" '
     .docker = (.docker // {})
-    | if .docker[$id] then . else .docker[$id] = {installed_version: $version, deployed_images: $images} end
+    | .docker[$id] = ({installed_version: $version, deployed_images: $images, in_progress: false} + (.docker[$id] // {}))
   ')"
   state::write_json "$json"
 }
@@ -105,6 +113,47 @@ state::write_docker_deployed_images() {
   json="$(state::read_json | jq -c --arg id "$stack_id" --argjson images "$deployed_images_json" '
     .docker = (.docker // {})
     | .docker[$id] = ((.docker[$id] // {}) + {deployed_images: $images})
+  ')"
+  state::write_json "$json"
+}
+
+state::mark_docker_stack_in_progress() {
+  local stack_id="$1"
+  local json
+
+  json="$(state::read_json | jq -c --arg id "$stack_id" '
+    .docker = (.docker // {})
+    | .docker[$id] = ((.docker[$id] // {}) + {in_progress: true})
+  ')"
+  state::write_json "$json"
+}
+
+state::clear_docker_stack_in_progress() {
+  local stack_id="$1"
+  local json
+
+  json="$(state::read_json | jq -c --arg id "$stack_id" '
+    .docker = (.docker // {})
+    | .docker[$id] = ((.docker[$id] // {}) + {in_progress: false})
+  ')"
+  state::write_json "$json"
+}
+
+state::is_docker_stack_in_progress() {
+  local stack_id="$1"
+
+  if [ "$(state::read_json | jq -r --arg id "$stack_id" '.docker[$id].in_progress // false')" = "true" ]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+state::clear_all_docker_stack_in_progress() {
+  local json
+
+  json="$(state::read_json | jq -c '
+    .docker = ((.docker // {}) | with_entries(.value = (.value + {in_progress: false})))
   ')"
   state::write_json "$json"
 }

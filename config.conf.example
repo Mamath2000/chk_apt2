@@ -7,17 +7,14 @@ MQTT_PORT=1883
 MQTT_USERNAME=
 MQTT_PASSWORD=
 
-# MQTT topics / discovery
-MQTT_BASE_TOPIC=apt-update
-OBJECT_ID=apt_update
-MQTT_CLIENT_ID=apt_mqtt_$(hostname -s)
-MQTT_GLOBAL_UPDATE_TOPIC=apt-update/global/update
-
 # Daemon behavior
 CHECK_INTERVAL=3600
-APT_MQTT_SERVICE_NAME=apt-mqtt.service
-APT_MQTT_INSTALL_DIR=
+APT_MQTT_LOG_LEVEL=INFO
 
 # Notes:
-# - The final runtime topic becomes <MQTT_BASE_TOPIC>/<sanitized-hostname>/...
+# - apt_mqtt utilise apt-update/<hostname> et docker_mqtt utilise docker-update/<hostname>.
+# - Les topics globaux sont codés en dur: apt-update/global/update et docker-update/global/update.
+# - Les client_id sont construits automatiquement à partir du hostname et du script.
+# - Le répertoire d'installation est injecté par le service systemd.
 # - AUTOREMOVE is configured in the daemon script.
+# - APT_MQTT_LOG_LEVEL supports DEBUG, INFO, WARN, ERROR.
