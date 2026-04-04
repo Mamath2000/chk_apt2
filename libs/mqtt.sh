@@ -1,23 +1,42 @@
 #!/usr/bin/env bash
 
+MQTT_LAST_ERROR=""
 
 
 mqtt::pub() {
   local topic="$1" payload="$2" retain="${3:-false}"
   local args=( -h "$BROKER" -p "$PORT" -i "$CLIENT_ID" )
+  local output rc
   if [ -n "$USERNAME" ]; then args+=( -u "$USERNAME" -P "$PASSWORD" ); fi
   if [ "$retain" = true ]; then args+=( -r ); fi
   tools::log DEBUG "MQTT publish: topic=$topic retain=$retain payload_bytes=${#payload}"
-  mosquitto_pub "${args[@]}" -t "$topic" -m "$payload"
+  if output=$(mosquitto_pub "${args[@]}" -t "$topic" -m "$payload" 2>&1); then
+    MQTT_LAST_ERROR=""
+    return 0
+  fi
+
+  rc=$?
+  MQTT_LAST_ERROR="$output"
+  tools::log WARN "MQTT publish échoué: topic=$topic rc=$rc error=${output:-unknown}"
+  return 0
 }
 
 mqtt::clear_retained() {
   local topic="$1"
   local args=( -h "$BROKER" -p "$PORT" -i "$CLIENT_ID" )
+  local output rc
 
   if [ -n "$USERNAME" ]; then args+=( -u "$USERNAME" -P "$PASSWORD" ); fi
   tools::log DEBUG "MQTT clear retained: topic=$topic"
-  mosquitto_pub "${args[@]}" -t "$topic" -n -r
+  if output=$(mosquitto_pub "${args[@]}" -t "$topic" -n -r 2>&1); then
+    MQTT_LAST_ERROR=""
+    return 0
+  fi
+
+  rc=$?
+  MQTT_LAST_ERROR="$output"
+  tools::log WARN "MQTT purge retained échouée: topic=$topic rc=$rc error=${output:-unknown}"
+  return 0
 }
 
 mqtt::sub() {

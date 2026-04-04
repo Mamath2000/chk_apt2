@@ -10,7 +10,8 @@ WorkingDirectory=/root/chk_apt2
 Environment=APT_MQTT_CONFIG=/root/chk_apt2/config.conf
 Environment=APT_MQTT_INSTALL_DIR=/root/chk_apt2
 ExecStart=/root/chk_apt2/apt_mqtt_daemon.sh
-Restart=on-failure
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

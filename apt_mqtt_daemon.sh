@@ -215,6 +215,7 @@ start_mqtt_subscription() {
 
 
 cleanup() {
+  local exit_status="${1:-0}"
   local pid
 
   if [ "$CLEANUP_DONE" = true ]; then
@@ -237,11 +238,13 @@ cleanup() {
   if [ -n "$CMD_FIFO" ] && [ -p "$CMD_FIFO" ]; then rm -f "$CMD_FIFO"; fi
   state::clear_in_progress
   mqtt::pub "$AVAIL_TOPIC" "offline" true || true
+
+  return "$exit_status"
 }
 
-trap 'cleanup; exit 130' SIGINT
-trap 'cleanup; exit 143' SIGTERM
-trap 'cleanup' EXIT
+trap 'trap - SIGINT EXIT; cleanup 130; exit 130' SIGINT
+trap 'trap - SIGTERM EXIT; cleanup 143; exit 143' SIGTERM
+trap 'status=$?; trap - EXIT; cleanup "$status"; exit "$status"' EXIT
 
 main() {
   # publish discovery and set online

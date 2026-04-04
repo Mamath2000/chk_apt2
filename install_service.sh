@@ -150,7 +150,8 @@ WorkingDirectory=$SCRIPT_DIR
 Environment=APT_MQTT_CONFIG=$CONFIG_PATH
 Environment=APT_MQTT_INSTALL_DIR=$SCRIPT_DIR
 ExecStart=$DAEMON_PATH
-Restart=on-failure
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
