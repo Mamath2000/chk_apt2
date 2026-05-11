@@ -87,3 +87,20 @@ tools::log() {
 tools::sanitize_hostname() {
   printf '%s' "$1" | sed -E 's/[[:space:]]+/_/g; s/[^A-Za-z0-9._-]/_/g'
 }
+
+# Tue récursivement un processus et tous ses descendants (enfants, petits-enfants…)
+# Usage: tools::kill_subtree SIGNAL PID [PID…]
+tools::kill_subtree() {
+  local sig="${1:-TERM}"
+  local pid children
+  shift
+  for pid in "$@"; do
+    [ -n "$pid" ] || continue
+    # Tuer les descendants d'abord
+    mapfile -t children < <(pgrep -P "$pid" 2>/dev/null || true)
+    if [ "${#children[@]}" -gt 0 ]; then
+      tools::kill_subtree "$sig" "${children[@]}"
+    fi
+    kill "-${sig}" "$pid" 2>/dev/null || true
+  done
+}

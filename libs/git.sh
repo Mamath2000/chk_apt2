@@ -93,5 +93,13 @@ git::service_exists() {
 git::restart_service() {
   local service_name="$1"
 
-  systemctl restart "$service_name"
+  # Lance le redémarrage HORS du cgroup courant pour éviter que systemd
+  # ne tue le processus systemctl restart lui-même lors de l'arrêt du service.
+  if command -v systemd-run >/dev/null 2>&1; then
+    systemd-run --no-block -- systemctl restart "$service_name"
+  elif command -v setsid >/dev/null 2>&1; then
+    setsid systemctl restart "$service_name" </dev/null >/dev/null 2>&1 &
+  else
+    systemctl restart "$service_name"
+  fi
 }

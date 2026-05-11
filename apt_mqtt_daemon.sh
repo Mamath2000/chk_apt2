@@ -224,20 +224,27 @@ cleanup() {
   CLEANUP_DONE=true
 
   echo "Arrêt du démon..."
+
+  # Tuer récursivement tous les jobs en arrière-plan (enfants + descendants)
   for pid in "${ACTIVE_JOB_PIDS[@]}"; do
     [ -n "$pid" ] || continue
-    pkill -TERM -P "$pid" 2>/dev/null || true
-    kill "$pid" 2>/dev/null || true
+    tools::kill_subtree TERM "$pid"
   done
-  if [ -n "$LOOP_PID" ]; then pkill -TERM -P "$LOOP_PID" 2>/dev/null || true; fi
-  if [ -n "$MOSQ_PID" ]; then pkill -TERM -P "$MOSQ_PID" 2>/dev/null || true; fi
-  if [ -n "$MOSQ_PID" ]; then kill "$MOSQ_PID" 2>/dev/null || true; fi
-  if [ -n "$LOOP_PID" ]; then kill "$LOOP_PID" 2>/dev/null || true; fi
+  if [ -n "$LOOP_PID" ]; then tools::kill_subtree TERM "$LOOP_PID"; fi
+  if [ -n "$MOSQ_PID" ]; then tools::kill_subtree TERM "$MOSQ_PID"; fi
+
+  # Attendre la fin des processus enfants pour éviter les zombies
+  wait 2>/dev/null || true
+
   exec 3>&- 2>/dev/null || true
   exec 3<&- 2>/dev/null || true
   if [ -n "$CMD_FIFO" ] && [ -p "$CMD_FIFO" ]; then rm -f "$CMD_FIFO"; fi
   state::clear_in_progress
-  mqtt::pub "$AVAIL_TOPIC" "offline" true || true
+
+  # Publier "offline" avec un timeout pour éviter de bloquer si le broker est injoignable
+  ( timeout 5 mosquitto_pub -h "$BROKER" -p "$PORT" -i "${CLIENT_ID}_cleanup" \
+      ${USERNAME:+-u "$USERNAME" -P "$PASSWORD"} \
+      -r -t "$AVAIL_TOPIC" -m "offline" 2>/dev/null ) || true
 
   return "$exit_status"
 }
