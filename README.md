@@ -175,6 +175,8 @@ Commandes acceptées sur le topic Docker :
 
 Le device principal APT publie aussi un bouton Home Assistant qui envoie self-update sur le topic global configuré. Le daemon APT exécute alors le git pull du dépôt puis redémarre son propre service. S'il détecte qu'un service Docker MQTT est installé sur l'hôte, il le redémarre aussi.
 
+Le device principal APT publie aussi des boutons globaux supplémentaires qui envoient `restart-service` et `publish-sensors` sur le topic global APT, pour redémarrer le service APT MQTT sur tous les hôtes abonnés et forcer la republication des sensors.
+
 Home Assistant n'expose plus qu'un seul device principal : le main device APT MQTT.
 
 Le device principal APT publie aussi un bouton global Docker pull-all qui envoie un message sur le topic Docker global. Chaque daemon Docker abonné exécute alors une mise à jour de toutes les stacks détectées sur son hôte.

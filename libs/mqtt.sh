@@ -140,6 +140,24 @@ mqtt::publish_main_device_discovery() {
               "command_topic": $docker_global_update_topic,
               "payload_press": "pull-all",
               "icon": "mdi:docker"
+            },
+            "apt_mqtt_daemon_restart_all": {
+              "platform": "button",
+              "unique_id": "apt_mqtt_daemon_restart_all",
+              "default_entity_id": "button.apt_mqtt_daemon_restart_all",
+              "name": "Redemarrer le service APT MQTT",
+              "command_topic": $global_update_topic,
+              "payload_press": "restart-service",
+              "icon": "mdi:restart-alert"
+            },
+            "apt_mqtt_daemon_republish_sensors_all": {
+              "platform": "button",
+              "unique_id": "apt_mqtt_daemon_republish_sensors_all",
+              "default_entity_id": "button.apt_mqtt_daemon_republish_sensors_all",
+              "name": "Republier les capteurs APT MQTT",
+              "command_topic": $global_update_topic,
+              "payload_press": "publish-sensors",
+              "icon": "mdi:publish"
             }
 
         }

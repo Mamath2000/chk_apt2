@@ -182,6 +182,8 @@ Lors d'une mise à jour réelle, le flux est :
 
 Le device principal expose des boutons Home Assistant qui publient sur le topic global configuré.
 
+En plus de `self-update` et `upgrade-all`, l'autodiscovery du device principal publie aussi deux boutons globaux qui envoient `restart-service` et `publish-sensors`.
+
 Seul le daemon APT est abonné au topic global APT. Le daemon Docker est, lui, abonné à un topic global Docker distinct.
 
 - self-update : lance git pull --ff-only dans le répertoire d'installation configuré, republie ses attributs et sa version, puis redémarre le service APT configuré. Si le service Docker MQTT est installé, il est redémarré juste avant.
