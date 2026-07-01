@@ -159,12 +159,15 @@ Le daemon APT ouvre une souscription MQTT sur le topic de commande propre à l'h
 - dry-run, simulate : simulation via apt-get -s dist-upgrade
 - check, status : publication immédiate de l'état
 - self-update, update-script, update-scripts, git-pull : git pull du dépôt local puis redémarrage du service
+- restart, restart-service, service-restart : redémarrage du service systemd APT MQTT local
+- publish-sensors, republish-sensors, refresh-sensors, republish : republication du discovery et des valeurs MQTT des sensors APT
 
 Le daemon Docker ouvre une souscription MQTT sur son topic dédié docker-update/<host>/command ainsi que sur un topic global Docker. Les payloads suivants sont interprétés :
 
 - docker-install:<stack-id> : exécution d'une mise à jour Docker Compose ciblée
 - pull-all, docker-install-all, update-all : exécution d'une mise à jour de toutes les stacks détectées sur l'hôte
 - check, status : publication immédiate de l'état Docker
+- publish-sensors, republish-sensors, refresh-sensors, republish : republication du discovery et des valeurs MQTT des sensors Docker
 
 Lors d'une mise à jour réelle, le flux est :
 
@@ -183,6 +186,8 @@ Seul le daemon APT est abonné au topic global APT. Le daemon Docker est, lui, a
 
 - self-update : lance git pull --ff-only dans le répertoire d'installation configuré, republie ses attributs et sa version, puis redémarre le service APT configuré. Si le service Docker MQTT est installé, il est redémarré juste avant.
 - upgrade-all : lance le même flux que install/update/upgrade, donc apt-get update puis apt-get -y dist-upgrade sur chaque hôte abonné.
+- restart-service : redémarre uniquement le service APT MQTT de chaque hôte abonné, sans exécuter de git pull ni de mise à jour APT.
+- publish-sensors : force chaque hôte abonné à republier les payloads de discovery Home Assistant ainsi que les topics de valeurs de sensors.
 
 Le device principal APT expose aussi un bouton pull-all Docker qui publie sur DOCKER_GLOBAL_UPDATE_TOPIC.
 

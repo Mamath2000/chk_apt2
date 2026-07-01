@@ -197,6 +197,34 @@ handle_self_update() {
 }
 
 
+handle_service_restart() {
+  local target_service="$SERVICE_NAME"
+
+  if [ "$(state::is_in_progress)" = "true" ]; then
+    echo "Une opération est déjà en cours"
+    return
+  fi
+
+  if ! git::service_exists "$target_service"; then
+    echo "Service $target_service introuvable, redémarrage ignoré"
+    return 1
+  fi
+
+  tools::log INFO "Redémarrage demandé via MQTT: service=$target_service"
+  echo "Redémarrage du service $target_service..."
+  git::restart_service "$target_service"
+}
+
+
+handle_publish_sensors() {
+  tools::log INFO "Republication capteurs demandée via MQTT"
+  mqtt::publish_main_device_discovery
+  mqtt::publish_host_device_discovery
+  mqtt::pub "$AVAIL_TOPIC" "online" true
+  publish_status
+}
+
+
 start_mqtt_subscription() {
   local rc
 
@@ -281,6 +309,12 @@ main() {
             ;;
           self-update|update-script|update-scripts|git-pull)
             start_background_job "self-update" handle_self_update
+            ;;
+          restart|restart-service|service-restart)
+            start_background_job "service-restart" handle_service_restart
+            ;;
+          publish-sensors|republish-sensors|refresh-sensors|republish)
+            start_background_job "publish-sensors" handle_publish_sensors
             ;;
           check|status)
             publish_status

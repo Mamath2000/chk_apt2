@@ -364,6 +364,18 @@ handle_docker_install_all() {
 }
 
 
+handle_publish_docker_sensors() {
+  local docker_components
+
+  tools::log INFO "Republication capteurs Docker demandée via MQTT"
+  discover_docker_stacks
+  docker_components="$(build_docker_discovery_components)"
+  mqtt::publish_docker_device_discovery "$docker_components"
+  mqtt::pub "$AVAIL_TOPIC" "online" true
+  publish_docker_status
+}
+
+
 start_mqtt_subscription() {
   local rc
 
@@ -452,6 +464,9 @@ main() {
             ;;
           pull-all|docker-install-all|update-all)
             start_background_job "docker-install-all" handle_docker_install_all
+            ;;
+          publish-sensors|republish-sensors|refresh-sensors|republish)
+            start_background_job "docker-publish-sensors" handle_publish_docker_sensors
             ;;
           check|status)
             publish_docker_status

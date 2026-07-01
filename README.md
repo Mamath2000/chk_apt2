@@ -163,12 +163,15 @@ Commandes acceptées sur le topic APT :
 - dry-run, simulate : simulation sans changement
 - check, status : republie l'état immédiatement
 - self-update, update-script, update-scripts, git-pull : fait un git pull puis redémarre le service
+- restart, restart-service, service-restart : redémarre le service systemd APT MQTT local
+- publish-sensors, republish-sensors, refresh-sensors, republish : republie le discovery et les valeurs des sensors APT (state/attributes/version)
 
 Commandes acceptées sur le topic Docker :
 
 - docker-install:<stack-id> : met à jour une stack Docker Compose précise
 - pull-all, docker-install-all, update-all : met à jour toutes les stacks détectées sur l'hôte
 - check, status : republie l'état immédiatement
+- publish-sensors, republish-sensors, refresh-sensors, republish : republie le discovery et les valeurs des sensors Docker
 
 Le device principal APT publie aussi un bouton Home Assistant qui envoie self-update sur le topic global configuré. Le daemon APT exécute alors le git pull du dépôt puis redémarre son propre service. S'il détecte qu'un service Docker MQTT est installé sur l'hôte, il le redémarre aussi.
 
