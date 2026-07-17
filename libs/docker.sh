@@ -115,11 +115,33 @@ docker::capture_compose_output() {
   return "$rc"
 }
 
+docker::image_repository_from_ref() {
+  local image_ref="$1"
+  local repository="$image_ref"
+
+  repository="${repository%@*}"
+  if [[ "$repository" =~ :[^/]+$ ]]; then
+    repository="${repository%:*}"
+  fi
+
+  printf '%s' "$repository"
+}
+
 docker::image_digest_from_identifier() {
   local image_identifier="$1"
-  local repo_digests digest image_id
+  local expected_image_ref="${2:-}"
+  local repo_digests digest image_id expected_repository
 
   repo_digests="$(docker image inspect --format '{{json .RepoDigests}}' "$image_identifier" 2>/dev/null || printf '[]')"
+  if [ -n "$expected_image_ref" ]; then
+    expected_repository="$(docker::image_repository_from_ref "$expected_image_ref")"
+    digest="$(printf '%s' "$repo_digests" | jq -r --arg repo "$expected_repository" 'map(select(startswith($repo + "@sha256:"))) | .[0] // empty | split("@")[1]')"
+    if [ -n "$digest" ]; then
+      printf '%s' "$digest"
+      return 0
+    fi
+  fi
+
   digest="$(printf '%s' "$repo_digests" | jq -r 'map(select(contains("@sha256:"))) | .[0] // empty | split("@")[1]')"
   if [ -n "$digest" ]; then
     printf '%s' "$digest"
@@ -233,7 +255,7 @@ docker::deployed_service_images_json() {
       continue
     fi
 
-    if ! digest="$(docker::image_digest_from_identifier "$image_id")"; then
+    if ! digest="$(docker::image_digest_from_identifier "$image_id" "$image_ref")"; then
       digest="$image_id"
     fi
 
