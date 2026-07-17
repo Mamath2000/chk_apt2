@@ -135,14 +135,14 @@ docker::image_digest_from_identifier() {
   repo_digests="$(docker image inspect --format '{{json .RepoDigests}}' "$image_identifier" 2>/dev/null || printf '[]')"
   if [ -n "$expected_image_ref" ]; then
     expected_repository="$(docker::image_repository_from_ref "$expected_image_ref")"
-    digest="$(printf '%s' "$repo_digests" | jq -r --arg repo "$expected_repository" 'map(select(startswith($repo + "@sha256:"))) | .[0] // empty | split("@")[1]')"
+    digest="$(printf '%s' "$repo_digests" | jq -r --arg repo "$expected_repository" 'map(select(startswith($repo + "@sha256:"))) | last // empty | split("@")[1]')"
     if [ -n "$digest" ]; then
       printf '%s' "$digest"
       return 0
     fi
   fi
 
-  digest="$(printf '%s' "$repo_digests" | jq -r 'map(select(contains("@sha256:"))) | .[0] // empty | split("@")[1]')"
+  digest="$(printf '%s' "$repo_digests" | jq -r 'map(select(contains("@sha256:"))) | last // empty | split("@")[1]')"
   if [ -n "$digest" ]; then
     printf '%s' "$digest"
     return 0
@@ -155,6 +155,20 @@ docker::image_digest_from_identifier() {
   fi
 
   return 1
+}
+
+docker::image_repo_digests_json() {
+  local image_identifier="$1"
+  local expected_image_ref="${2:-}"
+  local repo_digests expected_repository
+
+  repo_digests="$(docker image inspect --format '{{json .RepoDigests}}' "$image_identifier" 2>/dev/null || printf '[]')"
+  if [ -n "$expected_image_ref" ]; then
+    expected_repository="$(docker::image_repository_from_ref "$expected_image_ref")"
+    printf '%s' "$repo_digests" | jq -c --arg repo "$expected_repository" 'map(select(startswith($repo + "@sha256:")) | split("@")[1])'
+  else
+    printf '%s' "$repo_digests" | jq -c 'map(select(contains("@sha256:")) | split("@")[1])'
+  fi
 }
 
 docker::service_image_refs_json() {
@@ -260,6 +274,36 @@ docker::deployed_service_images_json() {
     fi
 
     result="$(printf '%s' "$result" | jq -c --arg service "$service" --arg digest "$digest" '. + {($service): $digest}')"
+  done < <(printf '%s' "$services_json" | jq -r 'keys[]')
+
+  printf '%s' "$result"
+}
+
+docker::deployed_service_repo_digests_json() {
+  local compose_file="$1"
+  local services_json result service container_id image_id image_ref repo_digests_json
+
+  if ! services_json="$(docker::service_image_refs_json "$compose_file")"; then
+    return 1
+  fi
+
+  result='{}'
+  while IFS= read -r service; do
+    [ -z "$service" ] && continue
+    image_ref="$(printf '%s' "$services_json" | jq -r --arg service "$service" '.[$service] // empty')"
+
+    container_id="$(docker::compose "$compose_file" ps -a -q "$service" 2>/dev/null | head -n1 || true)"
+    if [ -z "$container_id" ]; then
+      continue
+    fi
+
+    image_id="$(docker inspect --format '{{.Image}}' "$container_id" 2>/dev/null || true)"
+    if [ -z "$image_id" ]; then
+      continue
+    fi
+
+    repo_digests_json="$(docker::image_repo_digests_json "$image_id" "$image_ref" 2>/dev/null || printf '[]')"
+    result="$(printf '%s' "$result" | jq -c --arg service "$service" --argjson digests "$repo_digests_json" '. + {($service): $digests}')"
   done < <(printf '%s' "$services_json" | jq -r 'keys[]')
 
   printf '%s' "$result"

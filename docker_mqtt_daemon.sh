@@ -179,7 +179,7 @@ publish_docker_stack_status_quick() {
 
 publish_docker_stack_status() {
   local stack_id="$1" compose_file="$2" state_topic="$3" attr_topic="$4"
-  local last_check in_progress installed_version latest_version deployed_images current_deployed_images resolved_images updates_json update_count attrs state_payload rc check_output
+  local last_check in_progress installed_version latest_version deployed_images current_deployed_images resolved_images updates_json update_count attrs state_payload rc check_output deployed_repo_digests locally_pulled_updates
 
   last_check=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   in_progress="$(state::is_docker_stack_in_progress "$stack_id")"
@@ -188,6 +188,12 @@ publish_docker_stack_status() {
     :
   else
     current_deployed_images='{}'
+  fi
+
+  if deployed_repo_digests="$(docker::deployed_service_repo_digests_json "$compose_file")"; then
+    :
+  else
+    deployed_repo_digests='{}'
   fi
 
   state::ensure_docker_stack "$stack_id" "$current_deployed_images"
@@ -210,6 +216,10 @@ publish_docker_stack_status() {
 
   updates_json="$(docker_updates_json "$deployed_images" "$resolved_images")"
   update_count="$(printf '%s' "$updates_json" | jq 'length')"
+  locally_pulled_updates="$(jq -n --argjson updates "$updates_json" --argjson repo_digests "$deployed_repo_digests" '
+    $updates
+    | map(select((.latest as $latest | ($repo_digests[.service] // []) | index($latest)) != null))
+  ')"
   tools::log DEBUG "Statut stack Docker: id=$stack_id updates=$update_count in_progress=$in_progress compose_file=$compose_file"
   if [ "$update_count" -eq 0 ]; then
     latest_version="$installed_version"
@@ -231,9 +241,11 @@ publish_docker_stack_status() {
     --arg check_output "$check_output" \
     --arg last_result_code "$rc" \
     --argjson deployed_images "$deployed_images" \
+    --argjson deployed_repo_digests "$deployed_repo_digests" \
     --argjson latest_images "$resolved_images" \
     --argjson updates "$updates_json" \
-    '{count: ($updates|length), compose_file: $compose_file, updates: $updates, deployed_images: $deployed_images, latest_images: $latest_images, last_check: $last_check, in_progress: ($in_progress == "true"), last_result_code: ($last_result_code|tonumber), last_result: $check_output}')"
+    --argjson locally_pulled_updates "$locally_pulled_updates" \
+    '{count: ($updates|length), compose_file: $compose_file, updates: $updates, deployed_images: $deployed_images, deployed_repo_digests: $deployed_repo_digests, latest_images: $latest_images, locally_pulled_updates: $locally_pulled_updates, last_check: $last_check, in_progress: ($in_progress == "true"), last_result_code: ($last_result_code|tonumber), last_result: $check_output}')"
 
   mqtt::pub "$state_topic" "$state_payload" true
   mqtt::pub "$attr_topic" "$attrs" true
